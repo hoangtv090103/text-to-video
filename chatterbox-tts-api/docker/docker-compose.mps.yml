@@ -1,0 +1,119 @@
+services:
+  # Chatterbox TTS API - Optimized for macOS Docker
+  chatterbox-tts:
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile.mps
+    container_name: chatterbox-tts-api-macos
+    ports:
+      - '${PORT:-4123}:${PORT:-4123}'
+
+    # Optimize resource allocation for ARM64 macOS
+    deploy:
+      resources:
+        limits:
+          cpus: '0'  # Use all available CPUs
+          memory: 6G
+        reservations:
+          cpus: '4'
+          memory: 4G
+
+    # Docker Desktop optimizations
+    platform: linux/arm64
+
+    environment:
+      # API Configuration
+      - PORT=${PORT:-4123}
+      - HOST=${HOST:-0.0.0.0}
+
+      # TTS Model Settings - optimized for CPU
+      - EXAGGERATION=${EXAGGERATION:-0.5}
+      - CFG_WEIGHT=${CFG_WEIGHT:-0.5}
+      - TEMPERATURE=${TEMPERATURE:-0.7}  # Slightly lower for faster inference
+
+      # Text Processing - optimized chunk sizes
+      - MAX_CHUNK_LENGTH=${MAX_CHUNK_LENGTH:-250}  # Smaller chunks for CPU
+      - MAX_TOTAL_LENGTH=${MAX_TOTAL_LENGTH:-2500}
+
+      # Device and paths
+      - VOICE_SAMPLE_PATH=/app/voice-sample.mp3
+      - DEVICE=cpu  # Force CPU since MPS is not available in Docker
+      - MODEL_CACHE_DIR=/cache
+      - VOICE_LIBRARY_DIR=/voices
+
+      # Memory management - aggressive for CPU
+      - MEMORY_CLEANUP_INTERVAL=${MEMORY_CLEANUP_INTERVAL:-3}
+      - CUDA_CACHE_CLEAR_INTERVAL=${CUDA_CACHE_CLEAR_INTERVAL:-2}
+      - ENABLE_MEMORY_MONITORING=${ENABLE_MEMORY_MONITORING:-true}
+
+      # CPU optimization environment variables
+      - OMP_NUM_THREADS=8
+      - MKL_NUM_THREADS=8
+      - TORCH_NUM_THREADS=8
+      - OPENBLAS_NUM_THREADS=8
+      - VECLIB_MAXIMUM_THREADS=8
+
+      # PyTorch optimizations
+      - TORCH_CUDNN_V8_API_ENABLED=1
+      - PYTORCH_ENABLE_MPS_FALLBACK=1
+
+      # HuggingFace optimizations
+      - HF_HUB_DISABLE_TELEMETRY=1
+      - TRANSFORMERS_OFFLINE=0
+      - HF_HUB_CACHE=/cache/huggingface
+
+    volumes:
+      # Voice sample (from parent directory)
+      - ${VOICE_SAMPLE_HOST_PATH:-../voice-sample.mp3}:/app/voice-sample.mp3:ro
+
+      # Persistent model cache
+      - chatterbox-models-macos:/cache
+
+      # Persistent voice library
+      - chatterbox-voices-macos:/voices
+
+      # Optional: Custom voice samples directory
+      - ${VOICE_SAMPLES_DIR:-../voice-samples}:/app/voice-samples:ro
+
+    # Use tmpfs for temporary files to improve I/O performance
+    tmpfs:
+      - /tmp:size=1G,noexec,nosuid,nodev
+      - /var/tmp:size=512M,noexec,nosuid,nodev
+
+    # Optimize shared memory for better performance
+    shm_size: 2g
+
+    # Use host network mode for better performance (optional)
+    # network_mode: host  # Uncomment if you need maximum performance
+
+    restart: unless-stopped
+
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:${PORT:-4123}/health"]
+      interval: 45s
+      timeout: 15s
+      retries: 5
+      start_period: 10m  # Give it more time to initialize
+
+  # Optional: Frontend service
+  frontend:
+    profiles: ["frontend", "ui", "fullstack"]
+    build:
+      context: ../frontend
+      dockerfile: Dockerfile
+    container_name: chatterbox-tts-frontend-macos
+    ports:
+      - '${FRONTEND_PORT:-4321}:80'
+    depends_on:
+      - chatterbox-tts
+    restart: unless-stopped
+
+volumes:
+  chatterbox-models-macos:
+  chatterbox-voices-macos:
+
+networks:
+  default:
+    driver: bridge
+    driver_opts:
+      com.docker.network.driver.mtu: 1500

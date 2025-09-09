@@ -1,0 +1,17 @@
+fastapi
+uvicorn
+redis
+pydantic
+pydantic-settings
+python-json-logger
+httpx
+pydub
+peft
+openai>=1.3.0
+matplotlib
+pillow
+numpy
+requests
+aiofiles
+jinja2
+python-multipart
