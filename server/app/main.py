@@ -370,5 +370,124 @@ async def list_jobs(limit: int = 10):
         )
 
 
+@app.post("/api/v1/video/generate-sync")
+async def generate_video_sync(
+    file: UploadFile = File(...)
+):
+    """
+    Generate a video from source text synchronously.
+
+    This endpoint processes the request synchronously without using Redis or background tasks.
+    The processing happens directly in the request handler and returns the complete result.
+
+    Args:
+        file: Uploaded file containing source content
+
+    Returns:
+        Complete video generation result with all assets and processing details
+
+    Raises:
+        HTTPException: If request validation fails or processing errors occur
+    """
+    try:
+        # Generate unique job ID for tracking
+        job_id = str(uuid.uuid4())
+
+        # Validate request
+        if not file:
+            raise HTTPException(
+                status_code=400,
+                detail="File cannot be empty"
+            )
+
+        # Log request
+        logger.info("Synchronous video generation request received", extra={
+            "job_id": job_id,
+            "file": file.filename
+        })
+
+        # Read file contents
+        contents = await file.read()
+        file_context = FileContext(contents=contents, filename=file.filename)
+
+        # Import and run synchronous orchestrator
+        from app.orchestrator_sync import create_video_job_sync
+
+        # Process synchronously - this will block until completion
+        result = create_video_job_sync(job_id=job_id, file=file_context)
+
+        # Log completion
+        logger.info("Synchronous video generation completed", extra={
+            "job_id": job_id,
+            "status": result.get("status"),
+            "processing_time": result.get("processing_time")
+        })
+
+        return result
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error("Failed to create synchronous video generation job", extra={
+            "error": str(e),
+            "file": file.filename if file else "No file"
+        })
+        raise HTTPException(
+            status_code=500,
+            detail=f"Internal server error while processing video generation: {str(e)}"
+        )
+
+
+@app.get("/api/v1/video/download/{job_id}")
+async def download_video(job_id: str):
+    """
+    Download the generated video file for a completed job.
+
+    Args:
+        job_id: The job ID for the video to download
+
+    Returns:
+        FileResponse: The video file for download
+
+    Raises:
+        HTTPException: If video file not found or job not completed
+    """
+    try:
+        from fastapi.responses import FileResponse
+        import os
+
+        # Check if video file exists
+        video_path = f"/tmp/videos/job_{job_id}_final_video.mp4"
+
+        if not os.path.exists(video_path):
+            raise HTTPException(
+                status_code=404,
+                detail="Video file not found. Job may not be completed or file may have been cleaned up."
+            )
+
+        logger.info("Video download requested", extra={
+            "job_id": job_id,
+            "video_path": video_path
+        })
+
+        return FileResponse(
+            path=video_path,
+            media_type="video/mp4",
+            filename=f"video_{job_id}.mp4"
+        )
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error("Failed to download video", extra={
+            "job_id": job_id,
+            "error": str(e)
+        })
+        raise HTTPException(
+            status_code=500,
+            detail=f"Internal server error while downloading video: {str(e)}"
+        )
+
+
 if __name__ == "__main__":
     uvicorn.run(app, host="0.0.0.0", port=8000)
