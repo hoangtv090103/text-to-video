@@ -44,11 +44,11 @@ async def create_video_job(job_id: str, file: FileContext) -> None:
                 message="Initializing video generation",
                 progress=5
             )
-        
+
         # Step 1: Generate script from source text using LLM service
         if REDIS_AVAILABLE and redis_service:
             await redis_service.update_job_progress(job_id, 15, "Generating script from source text")
-        
+
         script_scenes = await generate_script(file)
 
         logger.info("Script generated successfully", extra={
@@ -73,7 +73,7 @@ async def create_video_job(job_id: str, file: FileContext) -> None:
         # Step 3: Process each scene with parallel audio and visual generation
         if REDIS_AVAILABLE and redis_service:
             await redis_service.update_job_progress(job_id, 30, "Starting parallel asset generation")
-        
+
         tasks = []
 
         for scene in script_scenes:
@@ -146,7 +146,7 @@ async def create_video_job(job_id: str, file: FileContext) -> None:
             "job_id": job_id,
             "error": str(e)
         })
-        
+
         # Set job status to failed
         if REDIS_AVAILABLE and redis_service:
             try:
@@ -161,7 +161,7 @@ async def create_video_job(job_id: str, file: FileContext) -> None:
                     "job_id": job_id,
                     "redis_error": str(redis_error)
                 })
-        
+
         raise
 
 

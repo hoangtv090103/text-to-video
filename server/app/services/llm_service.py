@@ -24,7 +24,7 @@ class LLMService:
 
     async def generate_script_from_file(self, file: FileContext) -> List[Dict]:
         """
-        Generate a structured video script from source text using LLM.
+        Generate a structured video script from source text using LLM asynchronously.
 
         Args:
             file: The uploaded file containing the source text
@@ -32,43 +32,22 @@ class LLMService:
         Returns:
             List of scene dictionaries with id, narration_text, visual_type, and visual_prompt
         """
-        logger.info("Starting LLM script generation", extra={"file": file.filename})
+        logger.info("Starting asynchronous LLM script generation", extra={"file": file.filename})
 
         try:
-            # # Create the prompt for script generation
-            # prompt = self._create_script_prompt(file)
-            # uploaded_file = await self.client.files.create(
-            #     file=file.contents, purpose="user_data"
-            # )
-            # # Call the LLM API
-            # response = await self.client.responses.create(
-            #     model=self.model,
-            #     input=[
-            #         {
-            #             "role": "system",
-            #             "content": "You are an expert video script writer. You create engaging, educational video scripts with synchronized narration and visuals."
-            #         },
-            #         {
-            #             "role": "user",
-            #             "content": [
-            #                 {
-            #                     "type": "input_file",
-            #                     "file_id": uploaded_file.id,
-            #                 },
-            #                 {
-            #                     "type": "input_text",
-            #                     "text": prompt
-            #                 }
-            #             ]
-            #         }
-            #     ],
-            # )
-
             # Upload the file using Google Gemini File API
             doc_io = io.BytesIO(file.contents)
+
+            # Determine MIME type based on file extension
+            mime_type = 'text/plain'
+            if file.filename.lower().endswith('.pdf'):
+                mime_type = 'application/pdf'
+            elif file.filename.lower().endswith(('.txt', '.md')):
+                mime_type = 'text/plain'
+
             uploaded_file = self.client.files.upload(
                 file=doc_io,
-                config={'mime_type':'application/pdf'}
+                config={'mime_type': mime_type}
             )
 
             # Create the prompt for script generation
@@ -84,7 +63,7 @@ class LLMService:
             script_content = response.text
             script_scenes = self._parse_script_response(str(script_content))
 
-            logger.info("LLM script generation completed", extra={
+            logger.info("Asynchronous LLM script generation completed", extra={
                 "scenes_generated": len(script_scenes),
                 "visual_types": [scene["visual_type"] for scene in script_scenes]
             })
@@ -92,53 +71,132 @@ class LLMService:
             return script_scenes
 
         except Exception as e:
-            logger.error("LLM script generation failed", extra={"error": str(e)})
+            logger.error("Asynchronous LLM script generation failed", extra={"error": str(e)})
             # Fallback to mock script on failure
             return self._generate_fallback_script(file.contents)
 
     def _create_script_prompt(self, file: FileContext) -> str:
         """
-        Create a structured prompt for the LLM to generate video scripts.
+        Create a detailed prompt for the LLM to generate video script.
 
         Args:
-            file: The uploaded file containing the source text
+            file: The uploaded file context
 
         Returns:
             Formatted prompt string
         """
-        prompt = f"""
-Transform the given file {file.filename} into a structured video script suitable for an educational video.
+        return f"""
+Based on the content of the uploaded file "{file.filename}", create a structured video script that breaks down the content into engaging scenes.
 
-REQUIREMENTS:
-1. Break the content into scenes/segments
-2. Each scene should have:
-   - A unique ID (starting from 1)
-   - Narration text (30-60 words per scene)
-   - Visual type (one of: slide, diagram, code, formula, chart)
-   - Visual prompt (detailed description for visual generation)
+For each scene, provide:
+1. A clear, conversational narration text that explains the key concepts
+2. A visual type (slide, diagram, animation, or image)
+3. A detailed visual prompt describing what should be shown
 
-VISUAL TYPES GUIDE:
-- slide: For introductions, conclusions, key points
-- diagram: For processes, relationships, flowcharts
-- code: For programming examples, algorithms
-- formula: For mathematical equations, scientific formulas
-- chart: For data visualization, statistics, comparisons
+Requirements:
+- Create 3-7 scenes maximum
+- Each scene should be 20-40 seconds of narration
+- Use simple, clear language suitable for educational content
+- Ensure visual prompts are specific and actionable
+- Focus on the most important concepts from the source material
 
-OUTPUT FORMAT (JSON):
+Return the response as a JSON array with this exact structure:
 ```json
 [
-  {{
-    "id": 1,
-    "narration_text": "Brief, clear narration for this scene",
-    "visual_type": "slide",
-    "visual_prompt": "Detailed description of what visual should be created"
-  }},
-  {{
-    "id": 2,
-    "narration_text": "Next scene narration",
-    "visual_type": "diagram",
-    "visual_prompt": "Specific visual requirements"
-  }}
+    {{
+        "id": 1,
+        "narration_text": "Clear, engaging narration explaining the concept...",
+        "visual_type": "slide",
+        "visual_prompt": "Detailed description of what should be visualized..."
+    }}
+]
+```
+
+Visual types must be one of: slide, diagram, animation, image
+"""
+
+    def _parse_script_response(self, response_content: str) -> List[Dict]:
+        """
+        Parse the LLM response to extract structured script data.
+
+        Args:
+            response_content: Raw response from LLM
+
+        Returns:
+            List of scene dictionaries
+        """
+        try:
+            # Try to extract JSON from the response
+            # Look for JSON blocks in the response
+            import re
+            json_match = re.search(r'```json\s*(.*?)\s*```', response_content, re.DOTALL)
+            if json_match:
+                json_content = json_match.group(1)
+            else:
+                # Try to find JSON without code blocks
+                json_match = re.search(r'\[.*\]', response_content, re.DOTALL)
+                if json_match:
+                    json_content = json_match.group(0)
+                else:
+                    raise ValueError("No JSON found in response")
+
+            # Parse the JSON
+            script_data = json.loads(json_content)
+
+            # Validate and clean the data
+            validated_scenes = []
+            for i, scene in enumerate(script_data):
+                validated_scene = {
+                    "id": scene.get("id", i + 1),
+                    "narration_text": scene.get("narration_text", "").strip(),
+                    "visual_type": self._validate_visual_type(scene.get("visual_type", "slide")),
+                    "visual_prompt": scene.get("visual_prompt", "").strip()
+                }
+
+                # Ensure all required fields are present
+                if validated_scene["narration_text"] and validated_scene["visual_prompt"]:
+                    validated_scenes.append(validated_scene)
+
+            if not validated_scenes:
+                raise ValueError("No valid scenes found in parsed response")
+
+            return validated_scenes
+
+        except Exception as e:
+            logger.error("Failed to parse LLM response", extra={"error": str(e), "response": response_content[:500]})
+            raise
+
+    def _validate_visual_type(self, visual_type: str) -> str:
+        """
+        Validate and normalize visual type.
+
+        Args:
+            visual_type: Raw visual type from LLM
+
+        Returns:
+            Validated visual type
+        """
+        valid_types = ["slide", "diagram", "animation", "image"]
+        normalized = visual_type.lower().strip()
+
+        if normalized in valid_types:
+            return normalized
+
+        # Map common variations
+        type_mapping = {
+            "presentation": "slide",
+            "chart": "diagram",
+            "graph": "diagram",
+            "flowchart": "diagram",
+            "video": "animation",
+            "gif": "animation",
+            "photo": "image",
+            "picture": "image"
+        }
+
+        return type_mapping.get(normalized, "slide")
+
+    def _generate_fallback_script(self, content: bytes) -> List[Dict]:
 ]
 ```
 
