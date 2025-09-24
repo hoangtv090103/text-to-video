@@ -1,198 +1,168 @@
 # TODO List
-## Text-to-Video Generation Service
+## Dịch vụ tạo video từ văn bản
 ---
 
 ## 🚀 PHẦN I: HOÀN THIỆN ỨNG DỤNG
 
-### 1. Error Handling & Validation
+### 1. Xử lý lỗi & kiểm tra dữ liệu
 
-#### 1.1 Cải thiện Exception Handling
+#### 1.1 Cải thiện xử lý ngoại lệ
 - **File**: `app/main.py`
-  - [ ] Thêm specific exception types thay vì catch tất cả `Exception`
-  - [ ] Implement circuit breaker pattern cho external service calls
-  - [ ] Thêm validation cho file upload (file size, format, content type)
-  - [ ] Handle case khi Redis service không available gracefully
+  - [ ] Thêm cơ chế ngắt kết nối tạm thời khi gọi tới các dịch vụ bên ngoài bị lỗi liên tục (giúp hệ thống không bị quá tải khi dịch vụ bên ngoài gặp sự cố)
+  - [ ] Thêm kiểm tra cho việc tải lên tập tin (kích thước, định dạng, loại nội dung)
+  - [ ] Xử lý trường hợp dịch vụ Redis không hoạt động
 
-#### 1.2 Input Validation
+#### 1.2 Kiểm tra dữ liệu đầu vào
 - **File**: `app/schemas/video.py`
-  - [ ] Tạo Pydantic models cho request validation
-  - [ ] Validate file formats được support (txt, pdf, md)
-  - [ ] Thêm file size limits và content validation
-  - [ ] Validate job_id format trong API endpoints
+  - [ ] Tạo mẫu kiểm tra dữ liệu cho yêu cầu gửi lên
+  - [ ] Kiểm tra định dạng tập tin được hỗ trợ (txt, pdf, md)
+  - [ ] Thêm giới hạn kích thước và kiểm tra nội dung tập tin
+  - [ ] Kiểm tra định dạng mã công việc trong các điểm truy cập API
 
-#### 1.3 Configuration & Environment
-- **File**: `app/core/config.py`
-  - [ ] Thêm validation cho environment variables
-  - [ ] Set default values cho optional configs
-  - [ ] Implement config validation at startup
-  - [ ] Add support for different environments (dev/staging/prod)
+### 2. Bổ sung tính năng còn thiếu
 
-### 2. Missing Features & Implementation Gaps
-
-#### 2.1 Video Composition Service
+#### 2.1 Dịch vụ ghép video
 - **File**: `app/services/video_composer_sync.py`
-  - [ ] Hoàn thiện video rendering logic
-  - [ ] Implement subtitle overlay cho video
-  - [ ] Add video format options (mp4, webm, avi)
-  - [ ] Implement proper audio-video sync
+  - [ ] Hoàn thiện logic tạo video
+  - [ ] Đảm bảo đồng bộ âm thanh và hình ảnh
 
-#### 2.2 File Management
+#### 2.2 Quản lý tập tin
 - **File**: `app/utils/file.py`
-  - [ ] Implement file cleanup mechanism
-  - [ ] Add file storage abstraction (local/S3/GCS)
-  - [ ] Implement file versioning
-  - [ ] Add file metadata tracking
+  - [ ] Thêm chức năng dọn dẹp tập tin
 
-#### 2.3 Job Management
+#### 2.3 Quản lý công việc
 - **Files**: `app/orchestrator.py`, `app/services/redis_service.py`
-  - [ ] Implement job cancellation functionality
-  - [ ] Add job retry mechanism with backoff
-  - [ ] Implement job priority queuing
-  - [ ] Add job expiration and cleanup
-  - [ ] Implement job result caching
-
-### 3. Security & Authentication
-
-#### 3.1 API Security
-- **File**: `app/main.py`
-  - [ ] Implement API key authentication
-  - [ ] Add rate limiting per client
-  - [ ] Implement request timeout handling
-  - [ ] Add CORS configuration cho production
-
-#### 3.2 Data Security
-- [ ] Encrypt sensitive data in Redis
-- [ ] Implement secure file upload validation
-- [ ] Add audit logging for sensitive operations
-- [ ] Sanitize user inputs to prevent injection attacks
+  - [ ] Thêm chức năng hủy công việc
+  - [ ] Thêm cơ chế thử lại công việc với thời gian chờ tăng dần
+  - [ ] Thêm hàng đợi công việc theo mức độ ưu tiên
+  - [ ] Thêm chức năng expiration job và clean job
+  - [ ] Thêm chức năng lưu kết quả công việc
 
 ## ⚡ PHẦN II: CẢI THIỆN HIỆU NĂNG
 
-### 1. I/O Performance Optimization
+### 1. Tối ưu hiệu năng nhập/xuất
 
-#### 1.1 HTTP Client Optimization
+#### 1.1 Tối ưu kết nối HTTP
 - **Files**: `app/services/tts_service.py`, `app/services/llm_service.py`
-  - [ ] **Critical**: Implement connection pooling cho httpx clients
-  - [ ] Optimize timeout values (hiện tại TTS timeout 300s quá cao)
-  - [ ] Add retry logic với exponential backoff
-  - [ ] Cache HTTP responses where appropriate
+  - [ ] **Quan trọng**: Thêm chức năng tái sử dụng kết nối cho httpx
+  - [ ] Tối ưu thời gian chờ (hiện tại TTS chờ 300s quá lâu)
 
-#### 1.2 File I/O Optimization
+#### 1.2 Tối ưu nhập/xuất tập tin
 - **Files**: `app/services/tts_service.py`, `app/services/visual_services.py`
-  - [ ] **High Priority**: Implement async file operations
-  - [ ] Use streaming for large file uploads/downloads
-  - [ ] Implement file compression for storage
-  - [ ] Add temporary file cleanup mechanism
+  #### 1.2 Tối ưu nhập/xuất tập tin
 
-### 2. Memory Management
+  - [ ] **Ưu tiên cao**: Thực hiện thao tác tập tin bất đồng bộ
+    - [ ] Sử dụng truyền tải liên tục để xử lý tập tin lớn khi tải lên/xuống
+    - [ ] Nén tập tin khi lưu để tiết kiệm dung lượng
+    - [ ] Thêm chức năng tự động dọn dẹp tập tin tạm
 
-#### 2.1 Memory Usage Optimization
-- **Files**: All service files
-  - [ ] **Critical**: Implement memory-efficient file processing
-  - [ ] Use generators instead of loading full files in memory
-  - [ ] Add memory monitoring and limits
-  - [ ] Implement garbage collection optimization
+### 2. Quản lý bộ nhớ
 
-#### 2.2 Resource Pooling
+#### 2.1 Tối ưu sử dụng bộ nhớ
+- **Files**: Tất cả các file dịch vụ
+  - [ ] **Quan trọng**: Xử lý tập tin tiết kiệm bộ nhớ
+  - [ ] Sử dụng bộ sinh thay vì tải toàn bộ tập tin vào bộ nhớ
+  - [ ] Thêm chức năng giám sát và giới hạn bộ nhớ
+  - [ ] Tối ưu hóa thu gom bộ nhớ
+
+#### 2.2 Quản lý tài nguyên
 - **File**: `app/services/redis_service.py`
-  - [ ] Implement Redis connection pooling
-  - [ ] Add connection health checking
-  - [ ] Optimize Redis key TTL values
-  - [ ] Implement Redis cluster support cho scaling
+  - [ ] Thêm chức năng tái sử dụng kết nối Redis
+  - [ ] Thêm kiểm tra sức khỏe kết nối
+  - [ ] Tối ưu thời gian sống của khóa Redis
+  - [ ] Thêm hỗ trợ cụm Redis để mở rộng
 
-### 3. Parallel Processing Optimization
+### 3. Tối ưu xử lý song song
 
-#### 3.1 Async Processing Enhancement
+#### 3.1 Tăng cường xử lý bất đồng bộ
 - **File**: `app/orchestrator.py`
-  - [ ] **High Priority**: Optimize task scheduling algorithm
-  - [ ] Implement proper task cancellation
-  - [ ] Add dynamic task prioritization
-  - [ ] Use asyncio.Semaphore để limit concurrent tasks
+  - [ ] **Ưu tiên cao**: Tối ưu thuật toán lên lịch công việc
+  - [ ] Thêm chức năng hủy công việc đúng cách
+  - [ ] Thêm chức năng ưu tiên động cho công việc
+  - [ ] Sử dụng asyncio.Semaphore để giới hạn số công việc chạy đồng thời
 
-#### 3.2 Background Job Processing
+#### 3.2 Xử lý background job
 - **File**: `app/main.py`
-  - [ ] Implement proper background task management
-  - [ ] Add job queue with priority levels
-  - [ ] Implement worker pool scaling
-  - [ ] Add job progress streaming to clients
+  - [ ] Thêm chức năng quản lý công việc nền đúng cách
+  - [ ] Thêm hàng đợi công việc theo mức độ ưu tiên
+  - [ ] Thêm chức năng mở rộng worker pool xử lý công việc
+  <!-- - [ ] Thêm chức năng gửi job status về cho người dùng -->
 
-### 4. Caching Strategy
+### 4. Chiến lược lưu tạm
 
-#### 4.1 Application-Level Caching
-- **All service files**
-  - [ ] **High Priority**: Cache LLM responses for similar inputs
-  - [ ] Implement TTS audio caching
-  - [ ] Cache generated visual assets
-  - [ ] Add cache invalidation strategies
+#### 4.1 Lưu tạm ở cấp ứng dụng
+- **Tất cả các file dịch vụ**
+  - [ ] **Ưu tiên cao**: Lưu tạm kết quả LLM cho input giống nhau
+  - [ ] Thêm chức năng lưu tạm âm thanh TTS
+  - [ ] Lưu tạm các tài nguyên hình ảnh đã tạo
+  - [ ] Thêm cơ chế xóa dữ liệu lưu tạm
 
-#### 4.2 Redis Optimization
+#### 4.2 Tối ưu Redis
 - **File**: `app/services/redis_service.py`
-  - [ ] Optimize Redis data structures usage
-  - [ ] Implement Redis clustering cho high availability
-  - [ ] Add Redis memory optimization
-  - [ ] Implement cache warming strategies
+  - [ ] Tối ưu cách sử dụng cấu trúc dữ liệu Redis
+  - [ ] Thêm hỗ trợ cụm Redis để tăng độ sẵn sàng
+  - [ ] Tối ưu bộ nhớ Redis
+  - [ ] Thêm chức năng làm nóng bộ nhớ đệm
 
-### 5. Database & Storage Performance
+### 5. Tối ưu lưu trữ dữ liệu
 
-#### 5.1 Data Access Optimization
-- [ ] Implement database connection pooling (if DB added)
-- [ ] Optimize Redis queries and data structures
-- [ ] Add database query monitoring
-- [ ] Implement read replicas cho scaling
+<!-- #### 5.1 Tối ưu truy cập dữ liệu
+- [ ] Thêm chức năng tái sử dụng kết nối cơ sở dữ liệu (nếu có)
+- [ ] Tối ưu truy vấn và cấu trúc dữ liệu Redis
+- [ ] Thêm chức năng đọc bản sao để mở rộng
 
-#### 5.2 Asset Storage Optimization
+#### 5.2 Tối ưu lưu trữ tài nguyên
 - **Files**: `app/services/tts_service.py`, `app/services/visual_services.py`
-  - [ ] **Critical**: Move from `/tmp` to proper persistent storage
-  - [ ] Implement CDN integration for asset delivery
-  - [ ] Add asset compression and optimization
-  - [ ] Implement distributed file storage
+  - [ ] **Quan trọng**: Chuyển lưu trữ từ `/tmp` sang nơi lưu trữ lâu dài
+  - [ ] Thêm chức năng tích hợp CDN để phân phối tài nguyên
+  - [ ] Thêm chức năng nén và tối ưu tài nguyên
+  - [ ] Thêm chức năng lưu trữ tập tin phân tán -->
 
-### 6. API Performance
+### 6. Tối ưu hiệu năng API
 
-#### 6.1 Request Processing Optimization
+#### 6.1 Tối ưu xử lý yêu cầu
 - **File**: `app/main.py`
-  - [ ] Implement request/response compression
-  - [ ] Add API response caching
-  - [ ] Optimize serialization/deserialization
-  - [ ] Implement API rate limiting efficiently
+  - [ ] Thêm chức năng nén dữ liệu gửi/nhận
+  - [ ] Thêm chức năng lưu tạm phản hồi API
+  - [ ] Tối ưu hóa chuyển đổi dữ liệu
+  - [ ] Thêm chức năng giới hạn tốc độ truy cập API hiệu quả
 
-#### 6.2 Concurrent Request Handling
-- [ ] **Critical**: Implement proper connection limits
-- [ ] Add request queuing mechanism
-- [ ] Optimize FastAPI worker configuration
-- [ ] Implement load balancing preparation
-
----
-
-## 🔧 IMMEDIATE ACTION ITEMS (Priority 1)
-
-### Critical Issues Cần Sửa Ngay:
-1. **Hard-coded timestamp** trong health check endpoint (line 158 main.py)
-2. **TTS timeout 300s** quá cao, cần optimize
-3. **Missing connection pooling** cho HTTP clients
-4. **File storage tạm thời** `/tmp` không persistent
-5. **Redis connection** không được reuse properly
-6. **Missing input validation** cho file uploads
-7. **Exception handling** quá generic
-
-### Performance Bottlenecks Cần Giải Quyết:
-1. **Synchronous file I/O** operations
-2. **No connection pooling** cho external services
-3. **Missing caching** cho repeated requests
-4. **Memory inefficient** file processing
-5. **No task limit** có thể overwhelm system
+#### 6.2 Xử lý đồng thời yêu cầu
+- [ ] **Quan trọng**: Thêm chức năng giới hạn kết nối đúng cách
+- [ ] Thêm hàng đợi yêu cầu
+- [ ] Tối ưu cấu hình worker của FastAPI
+- [ ] Chuẩn bị cho việc cân bằng tải
 
 ---
 
-## 🚀 DEPLOYMENT CONSIDERATIONS
+## 🔧 VIỆC CẦN LÀM
 
-### Production Readiness:
-- [ ] Implement proper configuration management
-- [ ] Add containerization optimization
-- [ ] Implement health check endpoints
-- [ ] Add monitoring and alerting
-- [ ] Implement proper logging aggregation
-- [ ] Add backup and disaster recovery
-- [ ] Implement security hardening
-- [ ] Add performance monitoring
+### Vấn đề nghiêm trọng cần sửa ngay:
+- [ ] Sửa giá trị thời gian hard-code trong health check ở `app/main.py` (dùng thời gian thực/uptime)
+- [ ] Giảm timeout TTS trong `app/services/tts_service.py` (ví dụ ~60s; tách connect/read timeout theo request)
+- [ ] Bật tái sử dụng kết nối HTTP (httpx.Client + connection pooling) cho `app/services/tts_service.py` và `app/services/llm_service.py`
+- [ ] Tái sử dụng kết nối Redis + health check trong `app/services/redis_service.py`
+- [ ] Thêm xác thực input upload file ở `app/schemas/video.py` và API: định dạng (txt/pdf/md), kích thước, content-type, job_id hợp lệ
+- [ ] Chuẩn hóa xử lý ngoại lệ trong `app/main.py` và các service (bắt lỗi cụ thể, mã lỗi/ thông điệp rõ ràng)
+- [ ] Dọn dẹp/làm mới chiến lược lưu tạm: tránh phụ thuộc `/tmp` cho dữ liệu cần tồn tại lâu hơn vòng đời process
 
+### Các điểm nghẽn hiệu năng cần giải quyết:
+- [ ] Chuyển thao tác tập tin sang bất đồng bộ; hỗ trợ streaming upload/download trong `app/services/tts_service.py`, `app/services/visual_services.py`
+- [ ] Thêm cache ngắn hạn: kết quả LLM theo input giống nhau, âm thanh TTS, tài nguyên hình ảnh đã tạo
+- [ ] Giới hạn số công việc đồng thời bằng `asyncio.Semaphore` trong `app/orchestrator.py` và hỗ trợ hủy job đúng cách
+- [ ] Thêm retry với backoff tăng dần và hàng đợi ưu tiên trong `app/orchestrator.py`, `app/services/redis_service.py`
+- [ ] Tối ưu tầng API: giới hạn kết nối đồng thời, bật nén phản hồi, cân nhắc response caching nhẹ trong `app/main.py`
+
+---
+
+## 🚀 LƯU Ý KHI TRIỂN KHAI
+
+### Sẵn sàng cho môi trường thực tế:
+- [ ] Thêm chức năng quản lý cấu hình đúng cách
+- [ ] Tối ưu hóa đóng gói ứng dụng
+- [ ] Thêm điểm kiểm tra sức khỏe
+- [ ] Thêm chức năng giám sát và cảnh báo
+- [ ] Thêm chức năng tổng hợp nhật ký
+- [ ] Thêm chức năng sao lưu và phục hồi dữ liệu
+- [ ] Tăng cường bảo mật
+- [ ] Thêm chức năng giám sát hiệu năng
