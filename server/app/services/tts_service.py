@@ -49,8 +49,16 @@ async def generate_audio(scene: Dict) -> Dict:
         "temperature": 0.3,    # Higher values = faster generation
     }
 
-    # Use httpx for asynchronous calls with increased timeout
-    async with httpx.AsyncClient(timeout=300) as client:
+    # Use httpx for asynchronous calls with optimized timeouts
+    # Separate connect and read timeouts for better control
+    timeout_config = httpx.Timeout(
+        connect=10.0,  # 10 seconds to establish connection
+        read=60.0,     # 60 seconds to read response
+        write=10.0,    # 10 seconds to write request
+        pool=5.0       # 5 seconds to get connection from pool
+    )
+    
+    async with httpx.AsyncClient(timeout=timeout_config) as client:
         response = await client.post(f"{CHATTERBOX_API_URL}", json=payload)
         response.raise_for_status()
 
