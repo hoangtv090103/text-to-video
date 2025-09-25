@@ -3,6 +3,7 @@ import logging
 import asyncio
 import httpx
 import uvicorn
+from datetime import datetime, timezone
 from fastapi import FastAPI, BackgroundTasks, HTTPException, UploadFile, File
 from fastapi.middleware.cors import CORSMiddleware
 from contextlib import asynccontextmanager
@@ -15,6 +16,9 @@ from app.services.llm_service import LLMService, check_llm_health
 from app.utils.file import FileContext
 
 logger = logging.getLogger(__name__)
+
+# Track application start time for uptime calculation
+APP_START_TIME = datetime.now(timezone.utc)
 
 # Import redis_service at module level but handle potential import errors gracefully
 try:
@@ -148,6 +152,10 @@ async def health_check():
         llm_healthy = await check_llm_health()
 
         overall_status = "healthy" if (tts_healthy and llm_healthy) else "degraded"
+        
+        # Calculate uptime
+        current_time = datetime.now(timezone.utc)
+        uptime_seconds = (current_time - APP_START_TIME).total_seconds()
 
         return {
             "status": overall_status,
@@ -156,7 +164,9 @@ async def health_check():
                 "tts_service": "healthy" if tts_healthy else "unhealthy",
                 "llm_service": "healthy" if llm_healthy else "unhealthy"
             },
-            "timestamp": "2024-01-01T00:00:00Z"  # In real implementation, use actual timestamp
+            "timestamp": current_time.isoformat(),
+            "uptime_seconds": uptime_seconds,
+            "started_at": APP_START_TIME.isoformat()
         }
 
     except Exception as e:
