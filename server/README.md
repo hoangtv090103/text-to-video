@@ -139,7 +139,7 @@
 
 ### Vấn đề nghiêm trọng cần sửa ngay:
 - [x] Sửa giá trị thời gian hard-code trong health check ở `app/main.py` (dùng thời gian thực/uptime)
-- [ ] Giảm timeout TTS trong `app/services/tts_service.py` (ví dụ ~60s; tách connect/read timeout theo request)
+- [x] Giảm timeout TTS trong `app/services/tts_service.py` (ví dụ ~60s; tách connect/read timeout theo request)
 - [ ] Bật tái sử dụng kết nối HTTP (httpx.Client + connection pooling) cho `app/services/tts_service.py` và `app/services/llm_service.py`
 - [ ] Tái sử dụng kết nối Redis + health check trong `app/services/redis_service.py`
 - [ ] Thêm xác thực input upload file ở `app/schemas/video.py` và API: định dạng (txt/pdf/md), kích thước, content-type, job_id hợp lệ
