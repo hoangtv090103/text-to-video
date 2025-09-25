@@ -7,10 +7,12 @@ import matplotlib.pyplot as plt
 import matplotlib.patches as mpatches
 import numpy as np
 
+from app.core.config import settings
+
 logger = logging.getLogger(__name__)
 
 # Asset storage configuration
-ASSET_STORAGE_PATH = os.environ.get("ASSET_STORAGE_PATH", "/tmp/visuals")
+ASSET_STORAGE_PATH = settings.VISUAL_STORAGE_PATH
 os.makedirs(ASSET_STORAGE_PATH, exist_ok=True)
 
 

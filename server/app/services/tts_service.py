@@ -11,7 +11,21 @@ CHATTERBOX_API_URL = settings.TTS_SERVICE_URL
 
 logger = logging.getLogger(__name__)
 
-ASSET_STORAGE_PATH = "/tmp/assets"
+ASSET_STORAGE_PATH = settings.ASSET_STORAGE_PATH
+
+# Shared HTTP client with connection pooling
+_tts_client = None
+
+def get_tts_client():
+    """Get or create shared HTTP client with connection pooling."""
+    global _tts_client
+    if _tts_client is None or _tts_client.is_closed:
+        timeout_config = httpx.Timeout(
+            connect=10.0, read=60.0, write=10.0, pool=5.0
+        )
+        limits = httpx.Limits(max_keepalive_connections=5, max_connections=10)
+        _tts_client = httpx.AsyncClient(timeout=timeout_config, limits=limits)
+    return _tts_client
 
 @exponential_backoff_retry(max_retries=3, base_delay=1.0)
 async def generate_audio(scene: Dict) -> Dict:
@@ -49,34 +63,26 @@ async def generate_audio(scene: Dict) -> Dict:
         "temperature": 0.3,    # Higher values = faster generation
     }
 
-    # Use httpx for asynchronous calls with optimized timeouts
-    # Separate connect and read timeouts for better control
-    timeout_config = httpx.Timeout(
-        connect=10.0,  # 10 seconds to establish connection
-        read=60.0,     # 60 seconds to read response
-        write=10.0,    # 10 seconds to write request
-        pool=5.0       # 5 seconds to get connection from pool
-    )
-    
-    async with httpx.AsyncClient(timeout=timeout_config) as client:
-        response = await client.post(f"{CHATTERBOX_API_URL}", json=payload)
-        response.raise_for_status()
+    # Use shared HTTP client with connection pooling
+    client = get_tts_client()
+    response = await client.post(f"{CHATTERBOX_API_URL}", json=payload)
+    response.raise_for_status()
 
-        # Ensure asset storage directory exists
-        os.makedirs(ASSET_STORAGE_PATH, exist_ok=True)
+    # Ensure asset storage directory exists
+    os.makedirs(ASSET_STORAGE_PATH, exist_ok=True)
 
-        # Generate unique file path
-        file_path = os.path.join(ASSET_STORAGE_PATH, f"segment_{seg_id}_{uuid4()}.wav")
+    # Generate unique file path
+    file_path = os.path.join(ASSET_STORAGE_PATH, f"segment_{seg_id}_{uuid4()}.wav")
 
-        # Save audio file
-        with open(file_path, "wb") as f:
-            f.write(response.content)
+    # Save audio file
+    with open(file_path, "wb") as f:
+        f.write(response.content)
 
-        logger.info(f"Successfully saved TTS audio to {file_path}", extra={"segment_id": seg_id})
+    logger.info(f"Successfully saved TTS audio to {file_path}", extra={"segment_id": seg_id})
 
-        # Get the duration of the audio file
-        duration = await get_audio_duration(file_path)
-        logger.info("Successfully retrieved duration of TTS audio", extra={"segment_id": seg_id, "duration": duration})
+    # Get the duration of the audio file
+    duration = await get_audio_duration(file_path)
+    logger.info("Successfully retrieved duration of TTS audio", extra={"segment_id": seg_id, "duration": duration})
 
     return {
         "path": file_path,
@@ -90,5 +96,9 @@ async def get_audio_duration(file_path):
         duration = audio.duration_seconds
         return duration
     except Exception as e:
-        logger.error(f"Failed to get duration of audio file {file_path}", extra={"error": str(e)})
+        logger.error("Failed to get audio duration", extra={
+            "error_type": type(e).__name__,
+            "error": str(e),
+            "file_path": file_path
+        })
         return None

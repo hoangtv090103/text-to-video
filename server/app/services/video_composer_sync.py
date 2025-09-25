@@ -7,10 +7,12 @@ from moviepy import (
 )
 import time
 
+from app.core.config import settings
+
 logger = logging.getLogger(__name__)
 
 # Video output configuration
-VIDEO_OUTPUT_PATH = os.environ.get("VIDEO_OUTPUT_PATH", "/tmp/videos")
+VIDEO_OUTPUT_PATH = settings.VIDEO_OUTPUT_PATH
 os.makedirs(VIDEO_OUTPUT_PATH, exist_ok=True)
 
 # Video settings

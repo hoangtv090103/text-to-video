@@ -12,7 +12,7 @@ CHATTERBOX_API_URL = settings.TTS_SERVICE_URL
 
 logger = logging.getLogger(__name__)
 
-ASSET_STORAGE_PATH = "/tmp/assets"
+ASSET_STORAGE_PATH = settings.ASSET_STORAGE_PATH
 
 
 def exponential_backoff_retry_sync(max_retries=3, base_delay=1.0):

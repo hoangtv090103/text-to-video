@@ -10,23 +10,55 @@ from contextlib import asynccontextmanager
 
 from app.core.logging_config import setup_logging
 from app.core.config import settings
-from app.schemas.video import JobStatusResponse
+from app.schemas.video import JobStatusResponse, validate_file_upload, validate_job_id, MAX_FILE_SIZE
 from app.orchestrator import create_video_job
 from app.services.llm_service import LLMService, check_llm_health
 from app.utils.file import FileContext
 
 logger = logging.getLogger(__name__)
 
+# Standardized error responses
+ERROR_CODES = {
+    "SERVICE_UNAVAILABLE": {"code": 503, "message": "Service temporarily unavailable"},
+    "VALIDATION_ERROR": {"code": 400, "message": "Invalid input data"},
+    "NOT_FOUND": {"code": 404, "message": "Resource not found"},
+    "INTERNAL_ERROR": {"code": 500, "message": "Internal server error"},
+    "REDIS_UNAVAILABLE": {"code": 503, "message": "Job tracking service unavailable"}
+}
+
+def handle_service_error(error: Exception, operation: str, **context) -> HTTPException:
+    """Standardized error handling with specific error types and clear messages."""
+    error_type = type(error).__name__
+    
+    # Map specific exceptions to error codes
+    if "ConnectionError" in error_type or "TimeoutError" in error_type:
+        error_info = ERROR_CODES["SERVICE_UNAVAILABLE"]
+        detail = f"{operation} failed: External service unavailable"
+    elif "ValidationError" in error_type or error_type == "HTTPException":
+        raise error  # Re-raise validation errors as-is
+    else:
+        error_info = ERROR_CODES["INTERNAL_ERROR"]
+        detail = f"{operation} failed: {error_info['message']}"
+    
+    logger.error(f"{operation} failed", extra={
+        "error_type": error_type,
+        "error": str(error),
+        **context
+    })
+    
+    return HTTPException(status_code=error_info["code"], detail=detail)
+
 # Track application start time for uptime calculation
 APP_START_TIME = datetime.now(timezone.utc)
 
 # Import redis_service at module level but handle potential import errors gracefully
 try:
-    from app.services.redis_service import redis_service
+    from app.services.redis_service import redis_service, check_redis_health
     REDIS_AVAILABLE = True
 except ImportError as e:
     print(f"Redis service not available: {e}")
     redis_service = None
+    check_redis_health = None
     REDIS_AVAILABLE = False
 
 
@@ -96,12 +128,27 @@ async def startup_health_checks():
     logger.info("All dependency health checks passed - application ready to accept requests")
 
 
+def ensure_storage_directories():
+    """Ensure persistent storage directories exist."""
+    import os
+    directories = [
+        settings.ASSET_STORAGE_PATH,
+        settings.VIDEO_OUTPUT_PATH,
+        settings.VISUAL_STORAGE_PATH
+    ]
+    for directory in directories:
+        os.makedirs(directory, exist_ok=True)
+        logger.info(f"Ensured storage directory exists: {directory}")
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     """Application lifespan manager for startup and shutdown events."""
     # Startup
     setup_logging()
     logger.info("Text-to-Video service starting up")
+    
+    # Ensure persistent storage directories exist
+    ensure_storage_directories()
 
     # Perform health checks before accepting requests
     await startup_health_checks()
@@ -150,8 +197,9 @@ async def health_check():
         # Check dependencies
         tts_healthy = await check_tts_health()
         llm_healthy = await check_llm_health()
+        redis_healthy = await check_redis_health() if REDIS_AVAILABLE and check_redis_health else False
 
-        overall_status = "healthy" if (tts_healthy and llm_healthy) else "degraded"
+        overall_status = "healthy" if (tts_healthy and llm_healthy and redis_healthy) else "degraded"
         
         # Calculate uptime
         current_time = datetime.now(timezone.utc)
@@ -162,7 +210,8 @@ async def health_check():
             "service": "text-to-video",
             "dependencies": {
                 "tts_service": "healthy" if tts_healthy else "unhealthy",
-                "llm_service": "healthy" if llm_healthy else "unhealthy"
+                "llm_service": "healthy" if llm_healthy else "unhealthy",
+                "redis_service": "healthy" if redis_healthy else "unhealthy"
             },
             "timestamp": current_time.isoformat(),
             "uptime_seconds": uptime_seconds,
@@ -170,11 +219,11 @@ async def health_check():
         }
 
     except Exception as e:
-        logger.error("Health check failed", extra={"error": str(e)})
+        logger.error("Health check failed", extra={"error_type": type(e).__name__, "error": str(e)})
         return {
             "status": "unhealthy",
             "service": "text-to-video",
-            "error": str(e)
+            "error": "Health check service failure"
         }
 
 
@@ -204,11 +253,18 @@ async def generate_video(
         # Generate unique job ID
         job_id = str(uuid.uuid4())
 
-        # Validate request
+        # Validate file upload
         if not file:
+            raise HTTPException(status_code=400, detail="File cannot be empty")
+        
+        validate_file_upload(file)
+        
+        # Check file size
+        contents = await file.read()
+        if len(contents) > MAX_FILE_SIZE:
             raise HTTPException(
-                status_code=400,
-                detail="File cannot be empty"
+                status_code=400, 
+                detail=f"File too large. Maximum size: {MAX_FILE_SIZE // (1024*1024)}MB"
             )
 
 
@@ -218,7 +274,6 @@ async def generate_video(
             "file": file.filename
         })
 
-        contents = await file.read()
         file_context = FileContext(contents=contents, filename=file.filename)
 
         # Set initial job status in Redis if available
@@ -252,14 +307,7 @@ async def generate_video(
     except HTTPException:
         raise
     except Exception as e:
-        logger.error("Failed to create video generation job", extra={
-            "error": str(e),
-            "file": file.filename
-        })
-        raise HTTPException(
-            status_code=500,
-            detail="Internal server error while creating video generation job"
-        )
+        raise handle_service_error(e, "Video generation job creation", file=file.filename)
 
 
 @app.get("/api/v1/video/status/{job_id}", response_model=JobStatusResponse)
@@ -274,13 +322,17 @@ async def get_job_status(job_id: str):
         Current job status and progress information with detailed metadata
     """
     try:
+        # Validate job ID format
+        validate_job_id(job_id)
+        
         logger.info("Job status requested", extra={"job_id": job_id})
 
         # Check if Redis is available
         if not REDIS_AVAILABLE or not redis_service:
+            error_info = ERROR_CODES["REDIS_UNAVAILABLE"]
             raise HTTPException(
-                status_code=503,
-                detail="Job status service is not available"
+                status_code=error_info["code"],
+                detail=error_info["message"]
             )
 
         # Query Redis for job status
@@ -319,14 +371,7 @@ async def get_job_status(job_id: str):
     except HTTPException:
         raise
     except Exception as e:
-        logger.error("Failed to get job status", extra={
-            "job_id": job_id,
-            "error": str(e)
-        })
-        raise HTTPException(
-            status_code=500,
-            detail="Failed to retrieve job status"
-        )
+        raise handle_service_error(e, "Job status retrieval", job_id=job_id)
 
 
 @app.get("/api/v1/video/jobs")
@@ -403,11 +448,18 @@ async def generate_video_sync(
         # Generate unique job ID for tracking
         job_id = str(uuid.uuid4())
 
-        # Validate request
+        # Validate file upload
         if not file:
+            raise HTTPException(status_code=400, detail="File cannot be empty")
+        
+        validate_file_upload(file)
+        
+        # Check file size
+        contents = await file.read()
+        if len(contents) > MAX_FILE_SIZE:
             raise HTTPException(
-                status_code=400,
-                detail="File cannot be empty"
+                status_code=400, 
+                detail=f"File too large. Maximum size: {MAX_FILE_SIZE // (1024*1024)}MB"
             )
 
         # Log request
@@ -416,8 +468,7 @@ async def generate_video_sync(
             "file": file.filename
         })
 
-        # Read file contents
-        contents = await file.read()
+        # Create file context with already-read contents
         file_context = FileContext(contents=contents, filename=file.filename)
 
         # Import and run synchronous orchestrator
@@ -438,14 +489,7 @@ async def generate_video_sync(
     except HTTPException:
         raise
     except Exception as e:
-        logger.error("Failed to create synchronous video generation job", extra={
-            "error": str(e),
-            "file": file.filename if file else "No file"
-        })
-        raise HTTPException(
-            status_code=500,
-            detail=f"Internal server error while processing video generation: {str(e)}"
-        )
+        raise handle_service_error(e, "Synchronous video generation", file=file.filename if file else "No file")
 
 
 @app.get("/api/v1/video/download/{job_id}")
@@ -467,7 +511,7 @@ async def download_video(job_id: str):
         import os
 
         # Check if video file exists
-        video_path = f"/tmp/videos/job_{job_id}_final_video.mp4"
+        video_path = f"{settings.VIDEO_OUTPUT_PATH}/job_{job_id}_final_video.mp4"
 
         if not os.path.exists(video_path):
             raise HTTPException(

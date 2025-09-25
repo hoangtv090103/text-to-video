@@ -12,6 +12,11 @@ class Settings(BaseSettings):
     LLM_API_KEY: str
     LLM_MODEL: str
     PRESENTON_BASE_URL: str
+    
+    # Storage paths - use persistent storage instead of /tmp
+    ASSET_STORAGE_PATH: str = "./data/assets"
+    VIDEO_OUTPUT_PATH: str = "./data/videos" 
+    VISUAL_STORAGE_PATH: str = "./data/visuals"
 
     class Config:
         env_file = "/Users/hoangtv/text-to-video/server/.env"

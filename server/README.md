@@ -140,11 +140,11 @@
 ### Vấn đề nghiêm trọng cần sửa ngay:
 - [x] Sửa giá trị thời gian hard-code trong health check ở `app/main.py` (dùng thời gian thực/uptime)
 - [x] Giảm timeout TTS trong `app/services/tts_service.py` (ví dụ ~60s; tách connect/read timeout theo request)
-- [ ] Bật tái sử dụng kết nối HTTP (httpx.Client + connection pooling) cho `app/services/tts_service.py` và `app/services/llm_service.py`
-- [ ] Tái sử dụng kết nối Redis + health check trong `app/services/redis_service.py`
-- [ ] Thêm xác thực input upload file ở `app/schemas/video.py` và API: định dạng (txt/pdf/md), kích thước, content-type, job_id hợp lệ
-- [ ] Chuẩn hóa xử lý ngoại lệ trong `app/main.py` và các service (bắt lỗi cụ thể, mã lỗi/ thông điệp rõ ràng)
-- [ ] Dọn dẹp/làm mới chiến lược lưu tạm: tránh phụ thuộc `/tmp` cho dữ liệu cần tồn tại lâu hơn vòng đời process
+- [x] Bật tái sử dụng kết nối HTTP (httpx.Client + connection pooling) cho `app/services/tts_service.py` và `app/services/llm_service.py`
+- [x] Tái sử dụng kết nối Redis + health check trong `app/services/redis_service.py`
+- [x] Thêm xác thực input upload file ở `app/schemas/video.py` và API: định dạng (txt/pdf/md), kích thước, content-type, job_id hợp lệ
+- [x] Chuẩn hóa xử lý ngoại lệ trong `app/main.py` và các service (bắt lỗi cụ thể, mã lỗi/ thông điệp rõ ràng)
+- [x] Dọn dẹp/làm mới chiến lược lưu tạm: tránh phụ thuộc `/tmp` cho dữ liệu cần tồn tại lâu hơn vòng đời process
 
 ### Các điểm nghẽn hiệu năng cần giải quyết:
 - [ ] Chuyển thao tác tập tin sang bất đồng bộ; hỗ trợ streaming upload/download trong `app/services/tts_service.py`, `app/services/visual_services.py`

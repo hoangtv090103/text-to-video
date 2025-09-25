@@ -32,6 +32,27 @@ class RedisService:
         if self.redis_client:
             await self.redis_client.close()
             self.redis_client = None
+
+    async def health_check(self) -> bool:
+        """
+        Check if Redis connection is healthy.
+        
+        Returns:
+            True if Redis is accessible, False otherwise
+        """
+        try:
+            client = await self.get_client()
+            # Simple ping to test connection
+            await client.ping()
+            return True
+        except Exception as e:
+            logger.error("Redis health check failed", extra={
+                "error_type": type(e).__name__,
+                "error": str(e)
+            })
+            # Reset client on failure to force reconnection
+            self.redis_client = None
+            return False
     # Job Status Management
     async def set_job_status(
         self,
@@ -221,3 +242,12 @@ class RedisService:
 
 # Global Redis service instance
 redis_service = RedisService()
+
+async def check_redis_health() -> bool:
+    """
+    Global function to check Redis health for use in application health checks.
+    
+    Returns:
+        True if Redis is healthy, False otherwise
+    """
+    return await redis_service.health_check()
