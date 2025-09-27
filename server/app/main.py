@@ -18,6 +18,8 @@ from app.services.llm_service import LLMService, check_llm_health
 from app.services.job_service import job_service
 from app.utils.file import FileContext
 
+# Initialize logging
+setup_logging()
 logger = logging.getLogger(__name__)
 
 MAX_FILE_SIZE = 50 * 1024 * 1024
@@ -93,7 +95,7 @@ def validate_file_upload(file: UploadFile) -> None:
         raise HTTPException(status_code=400, detail=f"Invalid content type. Allowed: {', '.join(ALLOWED_CONTENT_TYPES)}")
 
     logger.info("File validation passed", extra={
-        "filename": file.filename,
+        "file_name": file.filename,
         "size": file.size,
         "content_type": file.content_type
     })
@@ -202,7 +204,7 @@ async def generate_video(background_tasks: BackgroundTasks, file: UploadFile = F
         job_id = str(uuid.uuid4())
         validate_file_upload(file)
 
-        logger.info("Video generation request received", extra={"job_id": job_id, "file": file.filename})
+        logger.info("Video generation request received", extra={"job_id": job_id, "file_name": file.filename})
         contents = await file.read()
         file_context = FileContext(contents=contents, filename=file.filename)
 
@@ -226,7 +228,7 @@ async def generate_video(background_tasks: BackgroundTasks, file: UploadFile = F
     except HTTPException:
         raise
     except Exception as exc:
-        logger.error("Failed to create video generation job", extra={"error": str(exc), "file": file.filename})
+        logger.error("Failed to create video generation job", extra={"error": str(exc), "file_name": file.filename})
         raise HTTPException(status_code=500, detail="Internal server error while creating video generation job")
 
 

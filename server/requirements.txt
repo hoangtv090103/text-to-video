@@ -17,3 +17,10 @@ jinja2
 python-multipart
 moviepy
 imageio-ffmpeg
+Pygments
+graphviz
+texlive-latex-base
+texlive-latex-extra
+texlive-fonts-recommended
+mermaid-py
+cairosvg

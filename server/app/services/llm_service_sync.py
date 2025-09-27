@@ -30,7 +30,7 @@ class LLMServiceSync:
         Returns:
             List of scene dictionaries with id, narration_text, visual_type, and visual_prompt
         """
-        logger.info("Starting synchronous LLM script generation", extra={"file": file.filename})
+        logger.info("Starting synchronous LLM script generation", extra={"file_name": file.filename})
 
         try:
             # Upload the file using Google Gemini File API

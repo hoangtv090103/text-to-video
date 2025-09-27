@@ -16,7 +16,7 @@ composer = Composer()
 
 async def create_video_job(job_id: str, file: FileContext) -> None:
     """Orchestrate video generation for a job."""
-    logger.info("Starting video job creation", extra={"job_id": job_id, "file": file.filename})
+    logger.info("Starting video job creation", extra={"job_id": job_id, "file_name": file.filename})
 
     try:
         await job_service.initialize_job(job_id, message="Initializing video generation", progress=5)
