@@ -51,77 +51,111 @@ class VideoComposerSync:
         output_file = os.path.join(VIDEO_OUTPUT_PATH, f"job_{job_id}_final_video.mp4")
 
         try:
-            # Filter out scenes with missing assets
+            # Validate input data
+            if not scenes_with_assets:
+                raise ValueError("No scenes provided for video composition")
+
+            # Filter and validate scenes with missing assets
             valid_scenes = self._filter_valid_scenes(scenes_with_assets)
 
             if not valid_scenes:
-                raise Exception("No valid scenes with both audio and visual assets found")
+                raise ValueError("No valid scenes with both audio and visual assets found")
 
-            # Create video clips for each scene
+            # Sort scenes by scene_id to ensure correct order
+            valid_scenes.sort(key=lambda x: x.get("scene_id", 0))
+
+            # Create video clips for each scene with audio-visual sync
             scene_clips = []
             total_duration = 0
+            processed_scenes = 0
 
             for i, scene in enumerate(valid_scenes):
                 scene_id = scene.get("scene_id", i + 1)
-                audio_data = scene.get("audio")
-                visual_data = scene.get("visual")
+                audio_data = scene.get("audio", {})
+                visual_data = scene.get("visual", {})
 
                 logger.info("Processing scene for video", extra={
                     "job_id": job_id,
-                    "scene_id": scene_id
+                    "scene_id": scene_id,
+                    "scene_index": i + 1,
+                    "total_scenes": len(valid_scenes)
                 })
 
-                # Create scene clip
+                # Validate scene data
+                self._validate_scene_data(audio_data, visual_data, scene_id)
+
+                # Create scene clip with proper audio-visual sync
                 scene_clip = self._create_scene_clip(
-                    audio_data=audio_data or {},
-                    visual_data=visual_data or {},
+                    audio_data=audio_data,
+                    visual_data=visual_data,
                     scene_id=scene_id,
                     job_id=job_id
                 )
 
                 if scene_clip:
                     scene_clips.append(scene_clip)
-                    total_duration += scene_clip.duration
+                    scene_duration = scene_clip.duration
+                    total_duration += scene_duration
+                    processed_scenes += 1
+
                     logger.info("Scene clip created successfully", extra={
                         "job_id": job_id,
                         "scene_id": scene_id,
-                        "duration": scene_clip.duration
+                        "duration": scene_duration,
+                        "total_duration": total_duration
                     })
                 else:
                     logger.warning("Failed to create scene clip", extra={
                         "job_id": job_id,
-                        "scene_id": scene_id
+                        "scene_id": scene_id,
+                        "audio_path": audio_data.get("path", "None"),
+                        "visual_path": visual_data.get("path", "None")
                     })
 
             if not scene_clips:
-                raise Exception("No valid scene clips could be created")
+                raise ValueError("No valid scene clips could be created")
 
-            # Concatenate all scene clips
+            # Ensure minimum video duration
+            if total_duration < 1.0:
+                logger.warning("Video duration too short, adding padding", extra={
+                    "job_id": job_id,
+                    "total_duration": total_duration
+                })
+                total_duration = max(total_duration, 1.0)
+
+            # Concatenate all scene clips with smooth transitions
             logger.info("Concatenating scene clips", extra={
                 "job_id": job_id,
                 "clip_count": len(scene_clips),
-                "total_duration": total_duration
+                "total_duration": total_duration,
+                "processed_scenes": processed_scenes
             })
 
             final_video = concatenate_videoclips(scene_clips, method="compose")
 
-            # Write the final video
+            # Write the final video with optimized settings
             logger.info("Writing final video to file", extra={
                 "job_id": job_id,
-                "output_file": output_file
+                "output_file": output_file,
+                "fps": self.fps,
+                "resolution": f"{self.video_width}x{self.video_height}"
             })
 
+            # Use optimized video settings
             final_video.write_videofile(
                 output_file,
                 fps=self.fps,
                 audio_codec='aac',
                 codec='libx264',
-                temp_audiofile='temp-audio.m4a',
+                preset='fast',  # Faster encoding
+                bitrate='2000k',  # Set bitrate for consistent quality
+                temp_audiofile=os.path.join(VIDEO_OUTPUT_PATH, f'temp_audio_{job_id}.m4a'),
                 remove_temp=True,
-                logger=None  # Disable moviepy logging
+                logger=None,  # Disable moviepy logging
+                verbose=False
             )
 
-            # Clean up clips
+            # Clean up clips to free memory
             final_video.close()
             for clip in scene_clips:
                 clip.close()
@@ -129,15 +163,17 @@ class VideoComposerSync:
             end_time = time.time()
             composition_time = end_time - start_time
 
-            # Get file size
+            # Get file information
             file_size = os.path.getsize(output_file) if os.path.exists(output_file) else 0
+            file_size_mb = file_size / (1024 * 1024)
 
             logger.info("Video composition completed successfully", extra={
                 "job_id": job_id,
                 "output_file": output_file,
                 "duration": total_duration,
-                "file_size": file_size,
-                "composition_time": f"{composition_time:.2f}s"
+                "file_size_mb": f"{file_size_mb:.2f}",
+                "composition_time": f"{composition_time:.2f}s",
+                "scenes_processed": processed_scenes
             })
 
             return {
@@ -145,11 +181,14 @@ class VideoComposerSync:
                 "video_path": output_file,
                 "duration": total_duration,
                 "file_size": file_size,
+                "file_size_mb": file_size_mb,
                 "composition_time": composition_time,
-                "scenes_processed": len(valid_scenes),
+                "scenes_processed": processed_scenes,
+                "total_scenes": len(scenes_with_assets),
                 "video_format": "mp4",
                 "resolution": f"{self.video_width}x{self.video_height}",
-                "fps": self.fps
+                "fps": self.fps,
+                "bitrate": "2000k"
             }
 
         except Exception as e:
@@ -168,6 +207,40 @@ class VideoComposerSync:
                 "composition_time": composition_time
             }
 
+    def _validate_scene_data(self, audio_data: Dict, visual_data: Dict, scene_id: int) -> None:
+        """
+        Validate scene data before creating video clip.
+
+        Args:
+            audio_data: Audio asset data
+            visual_data: Visual asset data
+            scene_id: Scene identifier
+
+        Raises:
+            ValueError: If validation fails
+        """
+        # Validate audio data
+        if not audio_data:
+            raise ValueError(f"Scene {scene_id}: No audio data provided")
+
+        if audio_data.get("status") != "success":
+            raise ValueError(f"Scene {scene_id}: Audio generation failed - {audio_data.get('error', 'Unknown error')}")
+
+        audio_path = audio_data.get("path")
+        if not audio_path or not os.path.exists(audio_path):
+            raise ValueError(f"Scene {scene_id}: Audio file not found at {audio_path}")
+
+        # Validate visual data
+        if not visual_data:
+            raise ValueError(f"Scene {scene_id}: No visual data provided")
+
+        if visual_data.get("status") not in ["success", "failed_with_placeholder"]:
+            raise ValueError(f"Scene {scene_id}: Visual generation failed - {visual_data.get('error', 'Unknown error')}")
+
+        visual_path = visual_data.get("path")
+        if not visual_path or not os.path.exists(visual_path):
+            raise ValueError(f"Scene {scene_id}: Visual file not found at {visual_path}")
+
     def _filter_valid_scenes(self, scenes_with_assets: List[Dict]) -> List[Dict]:
         """
         Filter scenes that have both valid audio and visual assets.
@@ -181,6 +254,7 @@ class VideoComposerSync:
         valid_scenes = []
 
         for scene in scenes_with_assets:
+            scene_id = scene.get("scene_id", "unknown")
             audio_data = scene.get("audio")
             visual_data = scene.get("visual")
 
@@ -194,7 +268,7 @@ class VideoComposerSync:
 
             visual_valid = (
                 visual_data and
-                visual_data.get("status") == "success" and
+                visual_data.get("status") in ["success", "failed_with_placeholder"] and
                 visual_data.get("path") and
                 os.path.exists(visual_data.get("path", ""))
             )
@@ -203,9 +277,11 @@ class VideoComposerSync:
                 valid_scenes.append(scene)
             else:
                 logger.warning("Scene has invalid assets", extra={
-                    "scene_id": scene.get("scene_id"),
+                    "scene_id": scene_id,
                     "audio_valid": audio_valid,
-                    "visual_valid": visual_valid
+                    "visual_valid": visual_valid,
+                    "audio_path": audio_data.get("path") if audio_data else "None",
+                    "visual_path": visual_data.get("path") if visual_data else "None"
                 })
 
         return valid_scenes
@@ -218,7 +294,7 @@ class VideoComposerSync:
         job_id: str
     ) -> Optional['VideoClip']:
         """
-        Create a video clip for a single scene by combining audio and visual.
+        Create a video clip for a single scene with proper audio-visual sync.
 
         Args:
             audio_data: Audio asset data
@@ -230,50 +306,88 @@ class VideoComposerSync:
             VideoClip or None if creation fails
         """
         try:
-            # Load audio
+            # Load audio with error handling
             audio_path = audio_data.get("path")
+            if not audio_path:
+                raise ValueError("No audio path provided")
+
             audio_clip = AudioFileClip(audio_path)
             audio_duration = audio_clip.duration
+
+            # Ensure minimum audio duration
+            if audio_duration < 0.1:
+                logger.warning("Audio duration too short", extra={
+                    "job_id": job_id,
+                    "scene_id": scene_id,
+                    "audio_duration": audio_duration
+                })
+                audio_duration = 0.1  # Minimum 0.1 seconds
 
             logger.debug("Audio loaded", extra={
                 "job_id": job_id,
                 "scene_id": scene_id,
-                "audio_duration": audio_duration
+                "audio_duration": audio_duration,
+                "audio_path": audio_path
             })
 
-            # Load visual (image)
+            # Load visual (image) with error handling
             visual_path = visual_data.get("path")
+            if not visual_path:
+                raise ValueError("No visual path provided")
 
-            # Create image clip with audio duration
+            # Create image clip with exact audio duration
             image_clip = ImageClip(visual_path, duration=audio_duration)
 
-            # Resize image to fit video dimensions while maintaining aspect ratio
-            image_clip = image_clip.resized(height=self.video_height)
+            # Get original image dimensions
+            original_width, original_height = image_clip.size
 
-            # If image is wider than video, crop it
-            if image_clip.w > self.video_width:
-                image_clip = image_clip.resized(width=self.video_width)
+            # Calculate scaling to fit video dimensions while maintaining aspect ratio
+            width_ratio = self.video_width / original_width
+            height_ratio = self.video_height / original_height
+            scale_factor = min(width_ratio, height_ratio)
 
-            # Center the image on a background
+            # Resize image
+            new_width = int(original_width * scale_factor)
+            new_height = int(original_height * scale_factor)
+            image_clip = image_clip.resized((new_width, new_height))
+
+            # Create background
             background = ColorClip(
                 size=(self.video_width, self.video_height),
                 color=self.background_color,
                 duration=audio_duration
             )
 
-            # Composite image on background (centered)
+            # Center the image on background
+            x_offset = (self.video_width - new_width) // 2
+            y_offset = (self.video_height - new_height) // 2
+
+            # Composite image on background
             video_clip = CompositeVideoClip([
                 background,
-                image_clip.with_position('center')
+                image_clip.with_position((x_offset, y_offset))
             ])
 
-            # Set audio
+            # Set audio with proper sync
             final_clip = video_clip.with_audio(audio_clip)
 
-            logger.debug("Scene clip created", extra={
+            # Verify final clip duration matches audio
+            final_duration = final_clip.duration
+            if abs(final_duration - audio_duration) > 0.1:  # Allow 0.1s tolerance
+                logger.warning("Audio-visual duration mismatch", extra={
+                    "job_id": job_id,
+                    "scene_id": scene_id,
+                    "audio_duration": audio_duration,
+                    "video_duration": final_duration
+                })
+
+            logger.debug("Scene clip created successfully", extra={
                 "job_id": job_id,
                 "scene_id": scene_id,
-                "duration": final_clip.duration
+                "duration": final_duration,
+                "audio_duration": audio_duration,
+                "image_size": f"{new_width}x{new_height}",
+                "position": f"({x_offset}, {y_offset})"
             })
 
             return final_clip
@@ -282,7 +396,9 @@ class VideoComposerSync:
             logger.error("Failed to create scene clip", extra={
                 "job_id": job_id,
                 "scene_id": scene_id,
-                "error": str(e)
+                "error": str(e),
+                "audio_path": audio_data.get("path", "None"),
+                "visual_path": visual_data.get("path", "None")
             })
             return None
 

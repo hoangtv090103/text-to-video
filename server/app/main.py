@@ -3,152 +3,181 @@ import logging
 import asyncio
 import httpx
 import uvicorn
+import time
+from enum import Enum
+from typing import Dict, Optional, Callable, Any
 from fastapi import FastAPI, BackgroundTasks, HTTPException, UploadFile, File
 from fastapi.middleware.cors import CORSMiddleware
 from contextlib import asynccontextmanager
 
 from app.core.logging_config import setup_logging
 from app.core.config import settings
-from app.schemas.video import JobStatusResponse
+from app.schemas.video import JobStatus, JobStatusResponse
 from app.orchestrator import create_video_job
 from app.services.llm_service import LLMService, check_llm_health
+from app.services.job_service import job_service
 from app.utils.file import FileContext
 
 logger = logging.getLogger(__name__)
 
-# Import redis_service at module level but handle potential import errors gracefully
-try:
-    from app.services.redis_service import redis_service
-    REDIS_AVAILABLE = True
-except ImportError as e:
-    print(f"Redis service not available: {e}")
-    redis_service = None
-    REDIS_AVAILABLE = False
+MAX_FILE_SIZE = 50 * 1024 * 1024
+ALLOWED_FILE_TYPES = {'.txt', '.pdf', '.md'}
+ALLOWED_CONTENT_TYPES = {'text/plain', 'application/pdf', 'text/markdown'}
+
+
+class CircuitBreakerState(Enum):
+    CLOSED = "closed"
+    OPEN = "open"
+    HALF_OPEN = "half_open"
+
+
+class CircuitBreaker:
+    def __init__(self, name: str, failure_threshold: int = 5, recovery_timeout: int = 60):
+        self.name = name
+        self.failure_threshold = failure_threshold
+        self.recovery_timeout = recovery_timeout
+        self.failure_count = 0
+        self.last_failure_time: Optional[float] = None
+        self.state = CircuitBreakerState.CLOSED
+
+    def _can_attempt_call(self) -> bool:
+        if self.state == CircuitBreakerState.CLOSED:
+            return True
+        if self.state == CircuitBreakerState.OPEN:
+            if self.last_failure_time and time.time() - self.last_failure_time >= self.recovery_timeout:
+                self.state = CircuitBreakerState.HALF_OPEN
+                logger.info(f"Circuit breaker {self.name} transitioning to HALF_OPEN")
+                return True
+            return False
+        return True
+
+    def _record_success(self):
+        self.failure_count = 0
+        if self.state == CircuitBreakerState.HALF_OPEN:
+            self.state = CircuitBreakerState.CLOSED
+            logger.info(f"Circuit breaker {self.name} transitioning to CLOSED")
+
+    def _record_failure(self):
+        self.failure_count += 1
+        self.last_failure_time = time.time()
+        if self.failure_count >= self.failure_threshold:
+            self.state = CircuitBreakerState.OPEN
+            logger.warning(f"Circuit breaker {self.name} transitioning to OPEN after {self.failure_count} failures")
+
+    async def call(self, func: Callable, *args, **kwargs) -> Any:
+        if not self._can_attempt_call():
+            raise HTTPException(status_code=503, detail=f"Service {self.name} is temporarily unavailable")
+        try:
+            result = await func(*args, **kwargs)
+            self._record_success()
+            return result
+        except Exception as exc:
+            self._record_failure()
+            logger.error(f"Circuit breaker {self.name} recorded failure", extra={"error": str(exc)})
+            raise
+
+
+tts_circuit_breaker = CircuitBreaker("TTS", failure_threshold=3, recovery_timeout=30)
+llm_circuit_breaker = CircuitBreaker("LLM", failure_threshold=3, recovery_timeout=30)
+
+
+def validate_file_upload(file: UploadFile) -> None:
+    if file.size and file.size > MAX_FILE_SIZE:
+        raise HTTPException(status_code=413, detail=f"File too large. Maximum size {MAX_FILE_SIZE // (1024*1024)}MB")
+
+    file_extension = file.filename.lower() if file.filename else ""
+    if not any(file_extension.endswith(ext) for ext in ALLOWED_FILE_TYPES):
+        raise HTTPException(status_code=400, detail=f"Invalid file type. Allowed: {', '.join(ALLOWED_FILE_TYPES)}")
+
+    if file.content_type and file.content_type not in ALLOWED_CONTENT_TYPES:
+        raise HTTPException(status_code=400, detail=f"Invalid content type. Allowed: {', '.join(ALLOWED_CONTENT_TYPES)}")
+
+    logger.info("File validation passed", extra={
+        "filename": file.filename,
+        "size": file.size,
+        "content_type": file.content_type
+    })
 
 
 async def check_tts_health() -> bool:
-    """
-    Check if the TTS service is healthy and model is loaded.
-
-    Returns:
-        True if TTS service is ready, False otherwise
-    """
     try:
-        async with httpx.AsyncClient(timeout=30.0) as client:
-            response = await client.get(f"{settings.TTS_SERVICE_URL.replace('/audio/speech', '')}/health")
-
-            if response.status_code == 200:
-                health_data = response.json()
-                model_loaded = health_data.get("model_loaded", False)
-                return model_loaded
-
-            return False
-
-    except Exception as e:
-        logger.error("TTS health check failed", extra={"error": str(e)})
+        async def _health_check():
+            async with httpx.AsyncClient(timeout=30.0) as client:
+                response = await client.get(f"{settings.TTS_SERVICE_URL.replace('/audio/speech', '')}/health")
+                if response.status_code == 200:
+                    health_data = response.json()
+                    return health_data.get("model_loaded", False)
+                return False
+        return await tts_circuit_breaker.call(_health_check)
+    except Exception as exc:
+        logger.error("TTS health check failed", extra={"error": str(exc)})
         return False
 
 
-async def startup_health_checks():
-    """
-    Perform startup health checks for critical dependencies.
-    Application will not start accepting requests until all checks pass.
-    """
-    max_retries = 12  # 12 attempts with 5s intervals = 1 minute max wait
+async def startup_health_checks() -> None:
+    max_retries = 12
     base_delay = 5.0
-
     logger.info("Starting dependency health checks")
 
-    # Check TTS service
     for attempt in range(max_retries):
         logger.info(f"Checking TTS service health (attempt {attempt + 1}/{max_retries})")
-
         if await check_tts_health():
             logger.info("TTS service is healthy and model is loaded")
             break
-
         if attempt == max_retries - 1:
             logger.error("TTS service failed health check after maximum retries")
-            raise RuntimeError("TTS service is not ready - application cannot start")
-
+            raise RuntimeError("TTS service is not ready")
         logger.warning(f"TTS service not ready, retrying in {base_delay}s")
         await asyncio.sleep(base_delay)
 
-    # Check LLM service
     for attempt in range(max_retries):
         logger.info(f"Checking LLM service health (attempt {attempt + 1}/{max_retries})")
-
         if await check_llm_health():
             logger.info("LLM service is healthy")
             break
-
         if attempt == max_retries - 1:
             logger.error("LLM service failed health check after maximum retries")
-            raise RuntimeError("LLM service is not ready - application cannot start")
-
+            raise RuntimeError("LLM service is not ready")
         logger.warning(f"LLM service not ready, retrying in {base_delay}s")
         await asyncio.sleep(base_delay)
 
-    logger.info("All dependency health checks passed - application ready to accept requests")
+    logger.info("All dependency health checks passed")
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    """Application lifespan manager for startup and shutdown events."""
-    # Startup
     setup_logging()
     logger.info("Text-to-Video service starting up")
-
-    # Perform health checks before accepting requests
     await startup_health_checks()
-
     yield
-
-    # Shutdown
     logger.info("Text-to-Video service shutting down")
-
-    # Close Redis connection if available
-    if REDIS_AVAILABLE and redis_service:
-        try:
-            await redis_service.close()
-            logger.info("Redis connection closed")
-        except Exception as e:
-            logger.error("Error closing Redis connection", extra={"error": str(e)})
+    job_service.shutdown()
 
 
-# Create FastAPI app with lifespan management
 app = FastAPI(
     title="Text-to-Video Generation Service",
-    description="A scalable microservice for generating videos from text using parallel audio and visual processing",
+    description="Generate videos from text using parallel audio and visual processing",
     version="1.0.0",
     lifespan=lifespan
 )
 
-# Add CORS middleware for development
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],  # Configure appropriately for production
+    allow_origins=["*"],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
 )
 
-llm_service = LLMService(
+llm_service = LLMService()
 
-)
 
 @app.get("/health")
 async def health_check():
-    """
-    Health check endpoint with dependency status.
-    """
     try:
-        # Check dependencies
         tts_healthy = await check_tts_health()
         llm_healthy = await check_llm_health()
-
         overall_status = "healthy" if (tts_healthy and llm_healthy) else "degraded"
-
         return {
             "status": overall_status,
             "service": "text-to-video",
@@ -156,139 +185,64 @@ async def health_check():
                 "tts_service": "healthy" if tts_healthy else "unhealthy",
                 "llm_service": "healthy" if llm_healthy else "unhealthy"
             },
-            "timestamp": "2024-01-01T00:00:00Z"  # In real implementation, use actual timestamp
+            "timestamp": time.time()
         }
-
-    except Exception as e:
-        logger.error("Health check failed", extra={"error": str(e)})
+    except Exception as exc:
+        logger.error("Health check failed", extra={"error": str(exc)})
         return {
             "status": "unhealthy",
             "service": "text-to-video",
-            "error": str(e)
+            "error": str(exc)
         }
 
 
 @app.post("/api/v1/video/generate", response_model=JobStatusResponse)
-async def generate_video(
-    background_tasks: BackgroundTasks,
-    file: UploadFile = File(...)
-) -> JobStatusResponse:
-    """
-    Generate a video from source text.
-
-    This endpoint accepts source text and orchestrates the generation of audio and visual assets
-    in parallel, composing them into a final video. The processing happens asynchronously
-    in the background.
-
-    Args:
-        request: Video generation request with source text
-        background_tasks: FastAPI background tasks for asynchronous processing
-
-    Returns:
-        Job status response with unique job ID and status
-
-    Raises:
-        HTTPException: If request validation fails or service is unavailable
-    """
+async def generate_video(background_tasks: BackgroundTasks, file: UploadFile = File(...)) -> JobStatusResponse:
     try:
-        # Generate unique job ID
         job_id = str(uuid.uuid4())
+        validate_file_upload(file)
 
-        # Validate request
-        if not file:
-            raise HTTPException(
-                status_code=400,
-                detail="File cannot be empty"
-            )
-
-
-        # Log request
-        logger.info("Video generation request received", extra={
-            "job_id": job_id,
-            "file": file.filename
-        })
-
+        logger.info("Video generation request received", extra={"job_id": job_id, "file": file.filename})
         contents = await file.read()
         file_context = FileContext(contents=contents, filename=file.filename)
 
-        # Set initial job status in Redis if available
-        if REDIS_AVAILABLE and redis_service:
-            await redis_service.set_job_status(
-                job_id=job_id,
-                status="pending",
-                message="Job queued for processing"
-            )
+        await job_service.initialize_job(job_id, message="Job queued for processing", progress=5)
+        await job_service.add_to_queue(job_id)
 
-        # Add video job creation to background tasks
-        background_tasks.add_task(
-            create_video_job,
-            job_id=job_id,
-            file=file_context
-        )
+        background_tasks.add_task(create_video_job, job_id=job_id, file=file_context)
 
-        # Return immediate response with job ID
         response = JobStatusResponse(
             job_id=job_id,
-            status="pending"
+            status=JobStatus.PENDING,
+            message=None,
+            progress=None,
+            updated_at=None,
+            completed_at=None,
+            result=None
         )
-
-        logger.info("Video generation job queued", extra={
-            "job_id": job_id,
-            "status": "pending"
-        })
-
+        logger.info("Video generation job queued", extra={"job_id": job_id, "status": "pending"})
         return response
 
     except HTTPException:
         raise
-    except Exception as e:
-        logger.error("Failed to create video generation job", extra={
-            "error": str(e),
-            "file": file.filename
-        })
-        raise HTTPException(
-            status_code=500,
-            detail="Internal server error while creating video generation job"
-        )
+    except Exception as exc:
+        logger.error("Failed to create video generation job", extra={"error": str(exc), "file": file.filename})
+        raise HTTPException(status_code=500, detail="Internal server error while creating video generation job")
 
 
 @app.get("/api/v1/video/status/{job_id}", response_model=JobStatusResponse)
 async def get_job_status(job_id: str):
-    """
-    Get the status of a video generation job.
-
-    Args:
-        job_id: Unique identifier for the video generation job
-
-    Returns:
-        Current job status and progress information with detailed metadata
-    """
     try:
         logger.info("Job status requested", extra={"job_id": job_id})
-
-        # Check if Redis is available
-        if not REDIS_AVAILABLE or not redis_service:
-            raise HTTPException(
-                status_code=503,
-                detail="Job status service is not available"
-            )
-
-        # Query Redis for job status
-        job_data = await redis_service.get_job_status(job_id)
-
+        job_data = await job_service.get_job_status(job_id)
         if not job_data:
-            raise HTTPException(
-                status_code=404,
-                detail=f"Job {job_id} not found"
-            )
+            raise HTTPException(status_code=404, detail=f"Job {job_id} not found")
 
-        # Get job result if completed
         result_data = None
         if job_data.get("status") in ["completed", "completed_with_errors"]:
-            result_data = await redis_service.get_job_result(job_id)
+            result_data = await job_service.get_job_result(job_id)
 
-        # Build response
-        response = JobStatusResponse(
+        return JobStatusResponse(
             job_id=job_data.get("job_id", job_id),
             status=job_data.get("status", "unknown"),
             message=job_data.get("message"),
@@ -298,56 +252,21 @@ async def get_job_status(job_id: str):
             result=result_data
         )
 
-        logger.info("Job status retrieved", extra={
-            "job_id": job_id,
-            "status": response.status,
-            "progress": response.progress
-        })
-
-        return response
-
     except HTTPException:
         raise
-    except Exception as e:
-        logger.error("Failed to get job status", extra={
-            "job_id": job_id,
-            "error": str(e)
-        })
-        raise HTTPException(
-            status_code=500,
-            detail="Failed to retrieve job status"
-        )
+    except Exception as exc:
+        logger.error("Failed to get job status", extra={"job_id": job_id, "error": str(exc)})
+        raise HTTPException(status_code=500, detail="Failed to retrieve job status")
 
 
 @app.get("/api/v1/video/jobs")
 async def list_jobs(limit: int = 10):
-    """
-    List recent video generation jobs.
-
-    Args:
-        limit: Maximum number of jobs to return (default: 10, max: 100)
-
-    Returns:
-        List of job IDs and their basic status
-    """
     try:
-        # Limit the number of results to prevent overwhelming the response
         limit = min(limit, 100)
-
-        # Check if Redis is available
-        if not REDIS_AVAILABLE or not redis_service:
-            raise HTTPException(
-                status_code=503,
-                detail="Job listing service is not available"
-            )
-
-        # Get list of job IDs
-        job_ids = await redis_service.list_jobs(limit=limit)
-
-        # Get basic status for each job
+        job_ids = await job_service.list_jobs(limit=limit)
         jobs = []
         for job_id in job_ids:
-            job_data = await redis_service.get_job_status(job_id)
+            job_data = await job_service.get_job_status(job_id)
             if job_data:
                 jobs.append({
                     "job_id": job_id,
@@ -356,137 +275,63 @@ async def list_jobs(limit: int = 10):
                     "progress": job_data.get("progress"),
                     "updated_at": job_data.get("updated_at")
                 })
+        return {"jobs": jobs, "total_count": len(jobs)}
+    except Exception as exc:
+        logger.error("Failed to list jobs", extra={"error": str(exc)})
+        raise HTTPException(status_code=500, detail="Failed to list jobs")
 
+
+@app.post("/api/v1/video/cancel/{job_id}")
+async def cancel_job(job_id: str, reason: str = "User requested cancellation"):
+    try:
+        logger.info("Job cancellation requested", extra={"job_id": job_id, "reason": reason})
+        try:
+            uuid.UUID(job_id)
+        except ValueError:
+            raise HTTPException(status_code=400, detail="Invalid job ID format")
+
+        success = await job_service.cancel_job(job_id, reason)
+        if success:
+            logger.info("Job cancelled successfully", extra={"job_id": job_id})
+            return {"message": "Job cancelled successfully", "job_id": job_id, "reason": reason}
+
+        job_data = await job_service.get_job_status(job_id)
+        if job_data:
+            current_status = job_data.get("status", "unknown")
+            raise HTTPException(status_code=409, detail=f"Cannot cancel job in status: {current_status}")
+        raise HTTPException(status_code=404, detail=f"Job {job_id} not found")
+
+    except HTTPException:
+        raise
+    except Exception as exc:
+        logger.error("Failed to cancel job", extra={"job_id": job_id, "error": str(exc)})
+        raise HTTPException(status_code=500, detail=f"Internal server error while cancelling job: {str(exc)}")
+
+
+@app.get("/api/v1/video/active")
+async def get_active_jobs(limit: int = 50):
+    try:
+        limit = min(limit, 100)
+        active_jobs = await job_service.get_active_jobs(limit=limit)
+        return {"active_jobs": active_jobs, "total_count": len(active_jobs), "limit": limit}
+    except Exception as exc:
+        logger.error("Failed to get active jobs", extra={"error": str(exc)})
+        raise HTTPException(status_code=500, detail="Failed to retrieve active jobs")
+
+
+@app.post("/api/v1/admin/cleanup")
+async def cleanup_resources():
+    try:
+        logger.info("Resource cleanup requested")
+        cleanup_result = job_service.run_cleanup(max_age_hours=24)
         return {
-            "jobs": jobs,
-            "total_count": len(jobs)
+            "message": "Cleanup completed successfully",
+            "job_cleanup": cleanup_result,
+            "timestamp": time.time()
         }
-
-    except Exception as e:
-        logger.error("Failed to list jobs", extra={"error": str(e)})
-        raise HTTPException(
-            status_code=500,
-            detail="Failed to list jobs"
-        )
-
-
-@app.post("/api/v1/video/generate-sync")
-async def generate_video_sync(
-    file: UploadFile = File(...)
-):
-    """
-    Generate a video from source text synchronously.
-
-    This endpoint processes the request synchronously without using Redis or background tasks.
-    The processing happens directly in the request handler and returns the complete result.
-
-    Args:
-        file: Uploaded file containing source content
-
-    Returns:
-        Complete video generation result with all assets and processing details
-
-    Raises:
-        HTTPException: If request validation fails or processing errors occur
-    """
-    try:
-        # Generate unique job ID for tracking
-        job_id = str(uuid.uuid4())
-
-        # Validate request
-        if not file:
-            raise HTTPException(
-                status_code=400,
-                detail="File cannot be empty"
-            )
-
-        # Log request
-        logger.info("Synchronous video generation request received", extra={
-            "job_id": job_id,
-            "file": file.filename
-        })
-
-        # Read file contents
-        contents = await file.read()
-        file_context = FileContext(contents=contents, filename=file.filename)
-
-        # Import and run synchronous orchestrator
-        from app.orchestrator_sync import create_video_job_sync
-
-        # Process synchronously - this will block until completion
-        result = create_video_job_sync(job_id=job_id, file=file_context)
-
-        # Log completion
-        logger.info("Synchronous video generation completed", extra={
-            "job_id": job_id,
-            "status": result.get("status"),
-            "processing_time": result.get("processing_time")
-        })
-
-        return result
-
-    except HTTPException:
-        raise
-    except Exception as e:
-        logger.error("Failed to create synchronous video generation job", extra={
-            "error": str(e),
-            "file": file.filename if file else "No file"
-        })
-        raise HTTPException(
-            status_code=500,
-            detail=f"Internal server error while processing video generation: {str(e)}"
-        )
-
-
-@app.get("/api/v1/video/download/{job_id}")
-async def download_video(job_id: str):
-    """
-    Download the generated video file for a completed job.
-
-    Args:
-        job_id: The job ID for the video to download
-
-    Returns:
-        FileResponse: The video file for download
-
-    Raises:
-        HTTPException: If video file not found or job not completed
-    """
-    try:
-        from fastapi.responses import FileResponse
-        import os
-
-        # Check if video file exists
-        video_path = f"/tmp/videos/job_{job_id}_final_video.mp4"
-
-        if not os.path.exists(video_path):
-            raise HTTPException(
-                status_code=404,
-                detail="Video file not found. Job may not be completed or file may have been cleaned up."
-            )
-
-        logger.info("Video download requested", extra={
-            "job_id": job_id,
-            "video_path": video_path
-        })
-
-        return FileResponse(
-            path=video_path,
-            media_type="video/mp4",
-            filename=f"video_{job_id}.mp4"
-        )
-
-    except HTTPException:
-        raise
-    except Exception as e:
-        logger.error("Failed to download video", extra={
-            "job_id": job_id,
-            "error": str(e)
-        })
-        raise HTTPException(
-            status_code=500,
-            detail=f"Internal server error while downloading video: {str(e)}"
-        )
+    except Exception as exc:
+        logger.error("Resource cleanup failed", extra={"error": str(exc)})
+        raise HTTPException(status_code=500, detail=f"Cleanup failed: {str(exc)}")
 
 
 if __name__ == "__main__":

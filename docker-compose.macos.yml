@@ -1,16 +1,16 @@
 services:
-  redis:
-    image: redis:7-alpine
-    ports:
-      - "6379:6379"
-    command: redis-server --appendonly yes
-    volumes:
-      - redis_data:/data
-    healthcheck:
-      test: ["CMD", "redis-cli", "ping"]
-      interval: 30s
-      timeout: 3s
-      retries: 3
+  # redis:
+  #   image: redis:7-alpine
+  #   ports:
+  #     - "6379:6379"
+  #   command: redis-server --appendonly yes
+  #   volumes:
+  #     - redis_data:/data
+  #   healthcheck:
+  #     test: ["CMD", "redis-cli", "ping"]
+  #     interval: 30s
+  #     timeout: 3s
+  #     retries: 3
 
   # Chatterbox TTS API - Optimized for macOS Docker
   chatterbox-tts:
@@ -202,7 +202,7 @@ services:
       start_period: 60s
 
 volumes:
-  redis_data:
+  # redis_data:
   chatterbox-models:
   chatterbox-voices:
   chatterbox-models-macos:
