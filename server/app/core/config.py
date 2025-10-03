@@ -17,6 +17,9 @@ class Settings(BaseSettings):
     ASSET_STORAGE_PATH: str = "./data/assets"
     VIDEO_OUTPUT_PATH: str = "./data/videos" 
     VISUAL_STORAGE_PATH: str = "./data/visuals"
+    
+    # Concurrency limits
+    MAX_CONCURRENT_JOBS: int = 5
 
     class Config:
         env_file = "/Users/hoangtv/text-to-video/server/.env"

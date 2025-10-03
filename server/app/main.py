@@ -4,18 +4,47 @@ import asyncio
 import httpx
 import uvicorn
 from datetime import datetime, timezone
-from fastapi import FastAPI, BackgroundTasks, HTTPException, UploadFile, File
+from typing import Dict, Any
+from fastapi import FastAPI, BackgroundTasks, HTTPException, UploadFile, File, Request
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.middleware.gzip import GZipMiddleware
+from fastapi.responses import JSONResponse
 from contextlib import asynccontextmanager
+import time
 
 from app.core.logging_config import setup_logging
 from app.core.config import settings
 from app.schemas.video import JobStatusResponse, validate_file_upload, validate_job_id, MAX_FILE_SIZE
-from app.orchestrator import create_video_job
+from app.orchestrator import create_video_job, get_active_jobs
 from app.services.llm_service import LLMService, check_llm_health
 from app.utils.file import FileContext
 
 logger = logging.getLogger(__name__)
+
+# API optimization settings
+MAX_CONCURRENT_REQUESTS = 50  # Limit concurrent connections
+_request_semaphore = asyncio.Semaphore(MAX_CONCURRENT_REQUESTS)
+
+# Simple in-memory cache for light response caching
+_response_cache: Dict[str, Dict[str, Any]] = {}
+CACHE_TTL = 30  # 30 seconds TTL for health/status endpoints
+
+def get_cached_response(cache_key: str) -> Dict[str, Any] | None:
+    """Get cached response if not expired."""
+    if cache_key in _response_cache:
+        cached = _response_cache[cache_key]
+        if time.time() - cached["timestamp"] < CACHE_TTL:
+            return cached["data"]
+        else:
+            del _response_cache[cache_key]  # Remove expired
+    return None
+
+def set_cached_response(cache_key: str, data: Dict[str, Any]):
+    """Cache response with timestamp."""
+    _response_cache[cache_key] = {
+        "data": data,
+        "timestamp": time.time()
+    }
 
 # Standardized error responses
 ERROR_CODES = {
@@ -175,6 +204,9 @@ app = FastAPI(
     lifespan=lifespan
 )
 
+# Add response compression middleware
+app.add_middleware(GZipMiddleware, minimum_size=1000)
+
 # Add CORS middleware for development
 app.add_middleware(
     CORSMiddleware,
@@ -184,6 +216,14 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+# Connection limiting middleware
+@app.middleware("http")
+async def limit_concurrent_requests(request: Request, call_next):
+    """Limit concurrent requests to prevent overload."""
+    async with _request_semaphore:
+        response = await call_next(request)
+        return response
+
 llm_service = LLMService(
 
 )
@@ -191,8 +231,14 @@ llm_service = LLMService(
 @app.get("/health")
 async def health_check():
     """
-    Health check endpoint with dependency status.
+    Health check endpoint with dependency status (cached for 30s).
     """
+    # Check cache first
+    cache_key = "health_check"
+    cached_response = get_cached_response(cache_key)
+    if cached_response:
+        return cached_response
+    
     try:
         # Check dependencies
         tts_healthy = await check_tts_health()
@@ -205,7 +251,10 @@ async def health_check():
         current_time = datetime.now(timezone.utc)
         uptime_seconds = (current_time - APP_START_TIME).total_seconds()
 
-        return {
+        # Get active jobs count
+        active_jobs = get_active_jobs()
+        
+        response_data = {
             "status": overall_status,
             "service": "text-to-video",
             "dependencies": {
@@ -213,10 +262,17 @@ async def health_check():
                 "llm_service": "healthy" if llm_healthy else "unhealthy",
                 "redis_service": "healthy" if redis_healthy else "unhealthy"
             },
+            "active_jobs": len(active_jobs),
+            "max_concurrent_jobs": settings.MAX_CONCURRENT_JOBS,
+            "max_concurrent_requests": MAX_CONCURRENT_REQUESTS,
             "timestamp": current_time.isoformat(),
             "uptime_seconds": uptime_seconds,
             "started_at": APP_START_TIME.isoformat()
         }
+        
+        # Cache the response
+        set_cached_response(cache_key, response_data)
+        return response_data
 
     except Exception as e:
         logger.error("Health check failed", extra={"error_type": type(e).__name__, "error": str(e)})
@@ -313,7 +369,7 @@ async def generate_video(
 @app.get("/api/v1/video/status/{job_id}", response_model=JobStatusResponse)
 async def get_job_status(job_id: str):
     """
-    Get the status of a video generation job.
+    Get the status of a video generation job (cached for completed jobs).
 
     Args:
         job_id: Unique identifier for the video generation job
@@ -334,6 +390,12 @@ async def get_job_status(job_id: str):
                 status_code=error_info["code"],
                 detail=error_info["message"]
             )
+
+        # Check cache for completed jobs only
+        cache_key = f"job_status_{job_id}"
+        if cached_response := get_cached_response(cache_key):
+            if cached_response.get("status") in ["completed", "completed_with_errors", "failed", "cancelled"]:
+                return cached_response
 
         # Query Redis for job status
         job_data = await redis_service.get_job_status(job_id)
@@ -360,6 +422,10 @@ async def get_job_status(job_id: str):
             result=result_data
         )
 
+        # Cache completed/final status jobs
+        if response.status in ["completed", "completed_with_errors", "failed", "cancelled"]:
+            set_cached_response(cache_key, response.dict())
+
         logger.info("Job status retrieved", extra={
             "job_id": job_id,
             "status": response.status,
@@ -372,6 +438,47 @@ async def get_job_status(job_id: str):
         raise
     except Exception as e:
         raise handle_service_error(e, "Job status retrieval", job_id=job_id)
+
+
+@app.delete("/api/v1/video/cancel/{job_id}")
+async def cancel_job(job_id: str):
+    """
+    Cancel a running video generation job.
+
+    Args:
+        job_id: Unique identifier for the video generation job to cancel
+
+    Returns:
+        Confirmation of job cancellation
+    """
+    try:
+        # Validate job ID format
+        validate_job_id(job_id)
+        
+        logger.info("Job cancellation requested", extra={"job_id": job_id})
+
+        # Import cancel_job function
+        from app.orchestrator import cancel_job as orchestrator_cancel_job
+
+        # Attempt to cancel the job
+        cancelled = await orchestrator_cancel_job(job_id)
+
+        if cancelled:
+            return {
+                "job_id": job_id,
+                "status": "cancelled",
+                "message": "Job cancellation requested successfully"
+            }
+        else:
+            raise HTTPException(
+                status_code=404,
+                detail=f"Job {job_id} not found or already completed"
+            )
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise handle_service_error(e, "Job cancellation", job_id=job_id)
 
 
 @app.get("/api/v1/video/jobs")

@@ -42,6 +42,13 @@ async def call_presenton_api(visual_prompt: str, job_id: str, scene_id: int) -> 
     output_file = os.path.join(
         ASSET_STORAGE_PATH, f"job_{job_id}_scene_{scene_id}_slide.png")
 
+    # Check cache first for visual assets
+    from app.utils.cache import get_from_cache, set_cache
+    cached_result = await get_from_cache("visual", visual_prompt)
+    if cached_result and os.path.exists(cached_result):
+        logger.info("Using cached visual asset", extra={"cached_path": cached_result})
+        return cached_result
+
     try:
         # Get Presenton service URL from environment or use default
         presenton_url = os.environ.get("PRESENTON_URL", "http://localhost:9000")
@@ -149,6 +156,9 @@ async def call_presenton_api(visual_prompt: str, job_id: str, scene_id: int) -> 
                 "output_file": output_file
             })
 
+            # Cache the successful result
+            await set_cache("visual", visual_prompt, output_file)
+
     except Exception as e:
         logger.error("Failed to generate slide via Presenton API, using fallback", extra={
             "scene_id": scene_id,
@@ -196,11 +206,20 @@ async def call_presenton_api(visual_prompt: str, job_id: str, scene_id: int) -> 
         # Save asynchronously
         await async_savefig(plt, output_file, dpi=150, bbox_inches='tight', facecolor='white')
 
+    # Cache the result (both success and fallback)
+    await set_cache("visual", visual_prompt, output_file)
     return output_file
 async def render_diagram(visual_prompt: str, job_id: str, scene_id: int) -> str:
     """Renders a simple diagram/flowchart."""
     output_file = os.path.join(
         ASSET_STORAGE_PATH, f"job_{job_id}_scene_{scene_id}_diagram.png")
+
+    # Check cache first
+    from app.utils.cache import get_from_cache, set_cache
+    cached_result = await get_from_cache("visual", visual_prompt)
+    if cached_result and os.path.exists(cached_result):
+        logger.info("Using cached visual asset", extra={"cached_path": cached_result})
+        return cached_result
 
     def create_diagram():
         fig, ax = plt.subplots(figsize=(12, 8), facecolor='white')
@@ -240,6 +259,9 @@ async def render_diagram(visual_prompt: str, job_id: str, scene_id: int) -> str:
     
     # Save asynchronously after creation
     await async_savefig(plt, output_file, dpi=150, bbox_inches='tight', facecolor='white')
+    
+    # Cache the result
+    await set_cache("visual", visual_prompt, output_file)
     return output_file
 
 
@@ -247,6 +269,13 @@ async def generate_graph(visual_prompt: str, job_id: str, scene_id: int) -> str:
     """Generates a simple chart/graph."""
     output_file = os.path.join(
         ASSET_STORAGE_PATH, f"job_{job_id}_scene_{scene_id}_chart.png")
+
+    # Check cache first
+    from app.utils.cache import get_from_cache, set_cache
+    cached_result = await get_from_cache("visual", visual_prompt)
+    if cached_result and os.path.exists(cached_result):
+        logger.info("Using cached visual asset", extra={"cached_path": cached_result})
+        return cached_result
 
     def create_chart():
         fig, ax = plt.subplots(figsize=(10, 6), facecolor='white')
@@ -274,6 +303,9 @@ async def generate_graph(visual_prompt: str, job_id: str, scene_id: int) -> str:
 
     loop = asyncio.get_running_loop()
     await loop.run_in_executor(None, create_chart)
+    
+    # Cache the result
+    await set_cache("visual", visual_prompt, output_file)
     return output_file
 
 
@@ -281,6 +313,13 @@ async def render_formula(visual_prompt: str, job_id: str, scene_id: int) -> str:
     """Renders a mathematical formula."""
     output_file = os.path.join(
         ASSET_STORAGE_PATH, f"job_{job_id}_scene_{scene_id}_formula.png")
+
+    # Check cache first
+    from app.utils.cache import get_from_cache, set_cache
+    cached_result = await get_from_cache("visual", visual_prompt)
+    if cached_result and os.path.exists(cached_result):
+        logger.info("Using cached visual asset", extra={"cached_path": cached_result})
+        return cached_result
 
     def create_formula():
         fig, ax = plt.subplots(figsize=(10, 6), facecolor='white')
@@ -309,6 +348,9 @@ async def render_formula(visual_prompt: str, job_id: str, scene_id: int) -> str:
 
     loop = asyncio.get_running_loop()
     await loop.run_in_executor(None, create_formula)
+    
+    # Cache the result
+    await set_cache("visual", visual_prompt, output_file)
     return output_file
 
 
@@ -316,6 +358,13 @@ async def render_code(visual_prompt: str, job_id: str, scene_id: int) -> str:
     """Renders a code snippet with syntax highlighting."""
     output_file = os.path.join(
         ASSET_STORAGE_PATH, f"job_{job_id}_scene_{scene_id}_code.png")
+
+    # Check cache first
+    from app.utils.cache import get_from_cache, set_cache
+    cached_result = await get_from_cache("visual", visual_prompt)
+    if cached_result and os.path.exists(cached_result):
+        logger.info("Using cached visual asset", extra={"cached_path": cached_result})
+        return cached_result
 
     def create_code():
         fig, ax = plt.subplots(figsize=(12, 8), facecolor='#1a1a1a')
@@ -369,4 +418,7 @@ def generate_visual_asset(scene):
 
     loop = asyncio.get_running_loop()
     await loop.run_in_executor(None, create_code)
+    
+    # Cache the result
+    await set_cache("visual", visual_prompt, output_file)
     return output_file

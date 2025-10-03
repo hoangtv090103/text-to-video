@@ -34,6 +34,13 @@ class LLMService:
         """
         logger.info("Starting asynchronous LLM script generation", extra={"file": file.filename})
 
+        # Check cache first
+        from app.utils.cache import get_from_cache, set_cache
+        content_key = file.contents.decode('utf-8', errors='ignore')[:1000]  # Use first 1KB as key
+        cached_result = await get_from_cache("llm", content_key)
+        if cached_result:
+            return cached_result
+
         try:
             # Upload the file using Google Gemini File API
             doc_io = io.BytesIO(file.contents)
@@ -67,6 +74,9 @@ class LLMService:
                 "scenes_generated": len(script_scenes),
                 "visual_types": [scene["visual_type"] for scene in script_scenes]
             })
+
+            # Cache the successful result
+            await set_cache("llm", content_key, script_scenes)
 
             return script_scenes
 
@@ -197,12 +207,56 @@ Visual types must be one of: slide, diagram, animation, image
         return type_mapping.get(normalized, "slide")
 
     def _generate_fallback_script(self, content: bytes) -> List[Dict]:
-]
-```
+        """
+        Generate a fallback script when LLM fails.
 
-Generate the script now:
-"""
-        return prompt
+        Args:
+            content: Source content
+
+        Returns:
+            Basic script structure
+        """
+        logger.warning("Using fallback script generation")
+
+        # Create a simple script based on content length
+        text = content.decode('utf-8', errors='ignore')
+        word_count = len(text.split())
+        scene_count = max(3, min(7, word_count // 50))  # 1 scene per ~50 words
+
+        fallback_script = []
+
+        for i in range(scene_count):
+            if i == 0:
+                # Introduction scene
+                scene = {
+                    "id": i + 1,
+                    "narration_text": "Welcome to this presentation. Let's explore the key concepts and ideas.",
+                    "visual_type": "slide",
+                    "visual_prompt": "Create an engaging title slide with the main topic"
+                }
+            elif i == scene_count - 1:
+                # Conclusion scene
+                scene = {
+                    "id": i + 1,
+                    "narration_text": "To summarize, we've covered the essential points and their implications.",
+                    "visual_type": "slide",
+                    "visual_prompt": "Create a conclusion slide summarizing key takeaways"
+                }
+            else:
+                # Content scenes
+                visual_types = ["diagram", "chart", "code", "formula"]
+                visual_type = visual_types[(i - 1) % len(visual_types)]
+
+                scene = {
+                    "id": i + 1,
+                    "narration_text": "Now let's examine this important aspect of our topic in detail.",
+                    "visual_type": visual_type,
+                    "visual_prompt": f"Create a {visual_type} that illustrates the main concepts"
+                }
+
+            fallback_script.append(scene)
+
+        return fallback_script
 
     def _parse_script_response(self, response_content: str) -> List[Dict]:
         """
@@ -285,57 +339,6 @@ Generate the script now:
         }
 
         return type_mappings.get(visual_type, "slide")  # Default to slide
-
-    def _generate_fallback_script(self, text: str) -> List[Dict]:
-        """
-        Generate a fallback script when LLM fails.
-
-        Args:
-            text: Source text
-
-        Returns:
-            Basic script structure
-        """
-        logger.warning("Using fallback script generation")
-
-        # Create a simple script based on text length
-        word_count = len(text.split())
-        scene_count = max(3, min(7, word_count // 50))  # 1 scene per ~50 words
-
-        fallback_script = []
-
-        for i in range(scene_count):
-            if i == 0:
-                # Introduction scene
-                scene = {
-                    "id": i + 1,
-                    "narration_text": "Welcome to this presentation. Let's explore the key concepts and ideas.",
-                    "visual_type": "slide",
-                    "visual_prompt": "Create an engaging title slide with the main topic"
-                }
-            elif i == scene_count - 1:
-                # Conclusion scene
-                scene = {
-                    "id": i + 1,
-                    "narration_text": "To summarize, we've covered the essential points and their implications.",
-                    "visual_type": "slide",
-                    "visual_prompt": "Create a conclusion slide summarizing key takeaways"
-                }
-            else:
-                # Content scenes
-                visual_types = ["diagram", "chart", "code", "formula"]
-                visual_type = visual_types[(i - 1) % len(visual_types)]
-
-                scene = {
-                    "id": i + 1,
-                    "narration_text": "Now let's examine this important aspect of our topic in detail.",
-                    "visual_type": visual_type,
-                    "visual_prompt": f"Create a {visual_type} that illustrates the main concepts"
-                }
-
-            fallback_script.append(scene)
-
-        return fallback_script
 
 
 # Global service instance

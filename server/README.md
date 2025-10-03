@@ -77,9 +77,9 @@
 #### 3.1 Tăng cường xử lý bất đồng bộ
 - **File**: `app/orchestrator.py`
   - [ ] **Ưu tiên cao**: Tối ưu thuật toán lên lịch công việc
-  - [ ] Thêm chức năng hủy công việc đúng cách
+  - [x] Thêm chức năng hủy công việc đúng cách
   - [ ] Thêm chức năng ưu tiên động cho công việc
-  - [ ] Sử dụng asyncio.Semaphore để giới hạn số công việc chạy đồng thời
+  - [x] Sử dụng asyncio.Semaphore để giới hạn số công việc chạy đồng thời
 
 #### 3.2 Xử lý background job
 - **File**: `app/main.py`
@@ -92,9 +92,9 @@
 
 #### 4.1 Lưu tạm ở cấp ứng dụng
 - **Tất cả các file dịch vụ**
-  - [ ] **Ưu tiên cao**: Lưu tạm kết quả LLM cho input giống nhau
-  - [ ] Thêm chức năng lưu tạm âm thanh TTS
-  - [ ] Lưu tạm các tài nguyên hình ảnh đã tạo
+  - [x] **Ưu tiên cao**: Lưu tạm kết quả LLM cho input giống nhau
+  - [x] Thêm chức năng lưu tạm âm thanh TTS
+  - [x] Lưu tạm các tài nguyên hình ảnh đã tạo
   - [ ] Thêm cơ chế xóa dữ liệu lưu tạm
 
 #### 4.2 Tối ưu Redis
@@ -122,13 +122,13 @@
 
 #### 6.1 Tối ưu xử lý yêu cầu
 - **File**: `app/main.py`
-  - [ ] Thêm chức năng nén dữ liệu gửi/nhận
-  - [ ] Thêm chức năng lưu tạm phản hồi API
+  - [x] Thêm chức năng nén dữ liệu gửi/nhận
+  - [x] Thêm chức năng lưu tạm phản hồi API
   - [ ] Tối ưu hóa chuyển đổi dữ liệu
   - [ ] Thêm chức năng giới hạn tốc độ truy cập API hiệu quả
 
 #### 6.2 Xử lý đồng thời yêu cầu
-- [ ] **Quan trọng**: Thêm chức năng giới hạn kết nối đúng cách
+- [x] **Quan trọng**: Thêm chức năng giới hạn kết nối đúng cách
 - [ ] Thêm hàng đợi yêu cầu
 - [ ] Tối ưu cấu hình worker của FastAPI
 - [ ] Chuẩn bị cho việc cân bằng tải
@@ -148,10 +148,10 @@
 
 ### Các điểm nghẽn hiệu năng cần giải quyết:
 - [x] Chuyển thao tác tập tin sang bất đồng bộ; hỗ trợ streaming upload/download trong `app/services/tts_service.py`, `app/services/visual_services.py`
-- [ ] Thêm cache ngắn hạn: kết quả LLM theo input giống nhau, âm thanh TTS, tài nguyên hình ảnh đã tạo
-- [ ] Giới hạn số công việc đồng thời bằng `asyncio.Semaphore` trong `app/orchestrator.py` và hỗ trợ hủy job đúng cách
-- [ ] Thêm retry với backoff tăng dần và hàng đợi ưu tiên trong `app/orchestrator.py`, `app/services/redis_service.py`
-- [ ] Tối ưu tầng API: giới hạn kết nối đồng thời, bật nén phản hồi, cân nhắc response caching nhẹ trong `app/main.py`
+- [x] Thêm cache ngắn hạn: kết quả LLM theo input giống nhau, âm thanh TTS, tài nguyên hình ảnh đã tạo
+- [x] Giới hạn số công việc đồng thời bằng `asyncio.Semaphore` trong `app/orchestrator.py` và hỗ trợ hủy job đúng cách
+- [x] Thêm retry với backoff tăng dần và hàng đợi ưu tiên trong `app/orchestrator.py`, `app/services/redis_service.py`
+- [x] Tối ưu tầng API: giới hạn kết nối đồng thời, bật nén phản hồi, cân nhắc response caching nhẹ trong `app/main.py`
 
 ---
 

@@ -54,6 +54,12 @@ async def generate_audio(scene: Dict) -> Dict:
             "duration": 0
         }
 
+    # Check cache first for TTS audio
+    from app.utils.cache import get_from_cache, set_cache
+    cached_result = await get_from_cache("tts", text_input)
+    if cached_result:
+        return cached_result
+
     payload = {
         "input": text_input,
         "voice": "alloy",
@@ -86,11 +92,16 @@ async def generate_audio(scene: Dict) -> Dict:
     duration = await get_audio_duration(file_path)
     logger.info("Successfully retrieved duration of TTS audio", extra={"segment_id": seg_id, "duration": duration})
 
-    return {
+    result = {
         "path": file_path,
         "duration": duration,
         "status": "success"
     }
+    
+    # Cache the result
+    await set_cache("tts", text_input, result)
+    
+    return result
 
 async def get_audio_duration(file_path):
     try:
