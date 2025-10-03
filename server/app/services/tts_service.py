@@ -1,6 +1,7 @@
 import httpx
 import os
 import logging
+import aiofiles
 from typing import Dict
 from uuid import uuid4
 from pydub import AudioSegment
@@ -65,18 +66,19 @@ async def generate_audio(scene: Dict) -> Dict:
 
     # Use shared HTTP client with connection pooling
     client = get_tts_client()
-    response = await client.post(f"{CHATTERBOX_API_URL}", json=payload)
-    response.raise_for_status()
-
+    
     # Ensure asset storage directory exists
     os.makedirs(ASSET_STORAGE_PATH, exist_ok=True)
 
     # Generate unique file path
     file_path = os.path.join(ASSET_STORAGE_PATH, f"segment_{seg_id}_{uuid4()}.wav")
 
-    # Save audio file
-    with open(file_path, "wb") as f:
-        f.write(response.content)
+    # Stream download and save asynchronously for better memory usage
+    async with client.stream("POST", f"{CHATTERBOX_API_URL}", json=payload) as response:
+        response.raise_for_status()
+        async with aiofiles.open(file_path, "wb") as f:
+            async for chunk in response.aiter_bytes(chunk_size=8192):
+                await f.write(chunk)
 
     logger.info(f"Successfully saved TTS audio to {file_path}", extra={"segment_id": seg_id})
 

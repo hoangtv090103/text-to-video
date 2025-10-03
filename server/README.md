@@ -147,7 +147,7 @@
 - [x] Dọn dẹp/làm mới chiến lược lưu tạm: tránh phụ thuộc `/tmp` cho dữ liệu cần tồn tại lâu hơn vòng đời process
 
 ### Các điểm nghẽn hiệu năng cần giải quyết:
-- [ ] Chuyển thao tác tập tin sang bất đồng bộ; hỗ trợ streaming upload/download trong `app/services/tts_service.py`, `app/services/visual_services.py`
+- [x] Chuyển thao tác tập tin sang bất đồng bộ; hỗ trợ streaming upload/download trong `app/services/tts_service.py`, `app/services/visual_services.py`
 - [ ] Thêm cache ngắn hạn: kết quả LLM theo input giống nhau, âm thanh TTS, tài nguyên hình ảnh đã tạo
 - [ ] Giới hạn số công việc đồng thời bằng `asyncio.Semaphore` trong `app/orchestrator.py` và hỗ trợ hủy job đúng cách
 - [ ] Thêm retry với backoff tăng dần và hàng đợi ưu tiên trong `app/orchestrator.py`, `app/services/redis_service.py`
