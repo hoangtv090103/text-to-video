@@ -32,7 +32,7 @@ class LLMService:
         Returns:
             List of scene dictionaries with id, narration_text, visual_type, and visual_prompt
         """
-        logger.info("Starting asynchronous LLM script generation", extra={"file": file.filename})
+        logger.info("Starting asynchronous LLM script generation", extra={"file_name": file.filename})
 
         # Check cache first
         from app.utils.cache import get_from_cache, set_cache
@@ -124,139 +124,6 @@ Return the response as a JSON array with this exact structure:
 
 Visual types must be one of: slide, diagram, animation, image
 """
-
-    def _parse_script_response(self, response_content: str) -> List[Dict]:
-        """
-        Parse the LLM response to extract structured script data.
-
-        Args:
-            response_content: Raw response from LLM
-
-        Returns:
-            List of scene dictionaries
-        """
-        try:
-            # Try to extract JSON from the response
-            # Look for JSON blocks in the response
-            import re
-            json_match = re.search(r'```json\s*(.*?)\s*```', response_content, re.DOTALL)
-            if json_match:
-                json_content = json_match.group(1)
-            else:
-                # Try to find JSON without code blocks
-                json_match = re.search(r'\[.*\]', response_content, re.DOTALL)
-                if json_match:
-                    json_content = json_match.group(0)
-                else:
-                    raise ValueError("No JSON found in response")
-
-            # Parse the JSON
-            script_data = json.loads(json_content)
-
-            # Validate and clean the data
-            validated_scenes = []
-            for i, scene in enumerate(script_data):
-                validated_scene = {
-                    "id": scene.get("id", i + 1),
-                    "narration_text": scene.get("narration_text", "").strip(),
-                    "visual_type": self._validate_visual_type(scene.get("visual_type", "slide")),
-                    "visual_prompt": scene.get("visual_prompt", "").strip()
-                }
-
-                # Ensure all required fields are present
-                if validated_scene["narration_text"] and validated_scene["visual_prompt"]:
-                    validated_scenes.append(validated_scene)
-
-            if not validated_scenes:
-                raise ValueError("No valid scenes found in parsed response")
-
-            return validated_scenes
-
-        except Exception as e:
-            logger.error("Failed to parse LLM response", extra={"error": str(e), "response": response_content[:500]})
-            raise
-
-    def _validate_visual_type(self, visual_type: str) -> str:
-        """
-        Validate and normalize visual type.
-
-        Args:
-            visual_type: Raw visual type from LLM
-
-        Returns:
-            Validated visual type
-        """
-        valid_types = ["slide", "diagram", "animation", "image"]
-        normalized = visual_type.lower().strip()
-
-        if normalized in valid_types:
-            return normalized
-
-        # Map common variations
-        type_mapping = {
-            "presentation": "slide",
-            "chart": "diagram",
-            "graph": "diagram",
-            "flowchart": "diagram",
-            "video": "animation",
-            "gif": "animation",
-            "photo": "image",
-            "picture": "image"
-        }
-
-        return type_mapping.get(normalized, "slide")
-
-    def _generate_fallback_script(self, content: bytes) -> List[Dict]:
-        """
-        Generate a fallback script when LLM fails.
-
-        Args:
-            content: Source content
-
-        Returns:
-            Basic script structure
-        """
-        logger.warning("Using fallback script generation")
-
-        # Create a simple script based on content length
-        text = content.decode('utf-8', errors='ignore')
-        word_count = len(text.split())
-        scene_count = max(3, min(7, word_count // 50))  # 1 scene per ~50 words
-
-        fallback_script = []
-
-        for i in range(scene_count):
-            if i == 0:
-                # Introduction scene
-                scene = {
-                    "id": i + 1,
-                    "narration_text": "Welcome to this presentation. Let's explore the key concepts and ideas.",
-                    "visual_type": "slide",
-                    "visual_prompt": "Create an engaging title slide with the main topic"
-                }
-            elif i == scene_count - 1:
-                # Conclusion scene
-                scene = {
-                    "id": i + 1,
-                    "narration_text": "To summarize, we've covered the essential points and their implications.",
-                    "visual_type": "slide",
-                    "visual_prompt": "Create a conclusion slide summarizing key takeaways"
-                }
-            else:
-                # Content scenes
-                visual_types = ["diagram", "chart", "code", "formula"]
-                visual_type = visual_types[(i - 1) % len(visual_types)]
-
-                scene = {
-                    "id": i + 1,
-                    "narration_text": "Now let's examine this important aspect of our topic in detail.",
-                    "visual_type": visual_type,
-                    "visual_prompt": f"Create a {visual_type} that illustrates the main concepts"
-                }
-
-            fallback_script.append(scene)
-
-        return fallback_script
 
     def _parse_script_response(self, response_content: str) -> List[Dict]:
         """

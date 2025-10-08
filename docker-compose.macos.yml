@@ -1,16 +1,16 @@
 services:
-  redis:
-    image: redis:7-alpine
-    ports:
-      - "6379:6379"
-    command: redis-server --appendonly yes
-    volumes:
-      - redis_data:/data
-    healthcheck:
-      test: ["CMD", "redis-cli", "ping"]
-      interval: 30s
-      timeout: 3s
-      retries: 3
+  # redis:
+  #   image: redis:7-alpine
+  #   ports:
+  #     - "6379:6379"
+  #   command: redis-server --appendonly yes
+  #   volumes:
+  #     - redis_data:/data
+  #   healthcheck:
+  #     test: ["CMD", "redis-cli", "ping"]
+  #     interval: 30s
+  #     timeout: 3s
+  #     retries: 3
 
   # Chatterbox TTS API - Optimized for macOS Docker
   chatterbox-tts:
@@ -108,24 +108,20 @@ services:
       retries: 5
       start_period: 10m  # Give it more time to initialize
 
-  # server:
-  #   build: ./server
-  #   ports:
-  #     - "8000:8000"
-  #   environment:
-  #     - REDIS_HOST=${REDIS_HOST:-localhost}
-  #     - REDIS_PORT=${REDIS_PORT:-6379}
-  #     - REDIS_DB=${REDIS_DB:-0}
-  #     - LOG_LEVEL=${LOG_LEVEL:-info}
-  #     - TTS_SERVICE_URL=${TTS_SERVICE_URL:-http://localhost:4123/v1/audio/speech}
-  #     - LLM_URL=${LLM_URL}
-  #     - LLM_API_KEY=${LLM_API_KEY}
-  #     - LLM_MODEL=${LLM_MODEL}
-  #   depends_on:
-  #     redis:
-  #       condition: service_healthy
-  #   restart: unless-stopped
-  #   user: "0"
+  server:
+    build: ./server
+    ports:
+      - "8000:8000"
+    environment:
+      - LOG_LEVEL=${LOG_LEVEL:-info}
+      - TTS_SERVICE_URL=${TTS_SERVICE_URL:-http://localhost:4123/v1/audio/speech}
+      - LLM_URL=${LLM_URL}
+      - LLM_API_KEY=${LLM_API_KEY}
+      - LLM_MODEL=${LLM_MODEL}
+    depends_on:
+      - chatterbox-tts
+    restart: unless-stopped
+    user: "0"
 
   frontend:
     profiles: ["frontend", "ui", "fullstack"]
@@ -202,7 +198,6 @@ services:
       start_period: 60s
 
 volumes:
-  redis_data:
   chatterbox-models:
   chatterbox-voices:
   chatterbox-models-macos:

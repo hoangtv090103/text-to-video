@@ -22,7 +22,7 @@ def create_video_job_sync(job_id: str, file: FileContext) -> Dict:
     """
     logger.info("Starting synchronous video job creation", extra={
         "job_id": job_id,
-        "file": file.filename
+        "file_name": file.filename
     })
 
     start_time = time.time()
@@ -147,7 +147,8 @@ def create_video_job_sync(job_id: str, file: FileContext) -> Dict:
                     logger.info("Video composition completed successfully", extra={
                         "job_id": job_id,
                         "video_path": composition_result.get("video_path"),
-                        "video_duration": composition_result.get("duration")
+                        "video_duration": composition_result.get("duration"),
+                        "file_size_mb": composition_result.get("file_size_mb")
                     })
 
                     final_result = {
@@ -194,6 +195,25 @@ def create_video_job_sync(job_id: str, file: FileContext) -> Dict:
                     "script_scenes": script_scenes
                 }
 
+        except ImportError:
+            logger.error("Video composition module not available", extra={
+                "job_id": job_id,
+                "error": "MoviePy not installed"
+            })
+
+            # Fallback: return results without video composition
+            final_result = {
+                "job_id": job_id,
+                "status": "completed_without_video",
+                "message": "Assets generated but video composition unavailable: MoviePy not installed",
+                "total_scenes": len(script_scenes),
+                "successful_tasks": successful_tasks,
+                "failed_tasks": failed_tasks,
+                "processing_time": total_time,
+                "scenes": list(scenes_with_assets.values()),
+                "script_scenes": script_scenes,
+                "composition_error": "MoviePy not installed"
+            }
         except Exception as composition_error:
             logger.error("Video composition module error", extra={
                 "job_id": job_id,

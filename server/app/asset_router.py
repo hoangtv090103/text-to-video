@@ -91,10 +91,12 @@ async def generate_visual_asset(scene: Dict, job_id: str = "unknown") -> Dict:
             visual_path = await _call_visual_service(call_presenton_api, visual_prompt, job_id, scene_id)
         elif visual_type == "diagram":
             visual_path = await _call_visual_service(render_diagram, visual_prompt, job_id, scene_id)
-        elif visual_type == "code":
+        elif visual_type == "graph":
             visual_path = await _call_visual_service(generate_graph, visual_prompt, job_id, scene_id)
         elif visual_type == "formula":
             visual_path = await _call_visual_service(render_formula, visual_prompt, job_id, scene_id)
+        elif visual_type == "code":
+            visual_path = await _call_visual_service(render_code, visual_prompt, job_id, scene_id)
         else:
             # Handle unsupported types with generic service
             logger.warning("Unsupported visual type, using generic service", extra={

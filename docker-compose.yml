@@ -1,210 +1,81 @@
 services:
-  redis:
-    image: redis:7-alpine
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+    container_name: text-to-video-frontend
     ports:
-      - "6379:6379"
-    command: redis-server --appendonly yes
-    volumes:
-      - redis_data:/data
-    healthcheck:
-      test: ["CMD", "redis-cli", "ping"]
-      interval: 30s
-      timeout: 3s
-      retries: 3
+      - "3000:3000"
+    environment:
+      - NEXT_PUBLIC_API_URL=http://server:8000
+    depends_on:
+      - server
+    restart: unless-stopped
 
-  # Chatterbox TTS API
+  server:
+    build:
+      context: ./server
+      dockerfile: Dockerfile
+    container_name: text-to-video-server
+    ports:
+      - "8000:8000"
+    environment:
+      - TTS_SERVICE_URL=http://chatterbox-tts:4123/v1/audio/speech
+      - LLM_URL=${LLM_URL}
+      - LLM_API_KEY=${LLM_API_KEY}
+      - LLM_MODEL=${LLM_MODEL}
+      - LOG_LEVEL=info
+    depends_on:
+      - chatterbox-tts
+    restart: unless-stopped
+
   chatterbox-tts:
     build:
       context: ./chatterbox-tts-api
       dockerfile: docker/Dockerfile
     container_name: chatterbox-tts-api
     ports:
-      - '${PORT:-4123}:${PORT:-4123}'
-
-    deploy:
-      resources:
-        limits:
-          cpus: '0'  # Use all available CPUs
-          memory: 6G
-        reservations:
-          cpus: '4'
-          memory: 4G
-
+      - "4123:4123"
     environment:
-      # API Configuration
-      - PORT=${PORT:-4123}
-      - HOST=${HOST:-0.0.0.0}
-
-      # TTS Model Settings - optimized for CPU
-      - EXAGGERATION=${EXAGGERATION:-0.5}
-      - CFG_WEIGHT=${CFG_WEIGHT:-0.5}
-      - TEMPERATURE=${TEMPERATURE:-0.7}  # Slightly lower for faster inference
-
-      # Text Processing - optimized chunk sizes
-      - MAX_CHUNK_LENGTH=${MAX_CHUNK_LENGTH:-250}  # Smaller chunks for CPU
-      - MAX_TOTAL_LENGTH=${MAX_TOTAL_LENGTH:-2500}
-
-      # Device and paths
+      - PORT=4123
+      - HOST=0.0.0.0
+      - EXAGGERATION=0.5
+      - CFG_WEIGHT=0.5
+      - TEMPERATURE=0.7
+      - MAX_CHUNK_LENGTH=250
+      - MAX_TOTAL_LENGTH=2500
       - VOICE_SAMPLE_PATH=/app/voice-sample.mp3
-      - DEVICE=cpu  # Force CPU since MPS is not available in Docker
+      - DEVICE=cpu
       - MODEL_CACHE_DIR=/cache
       - VOICE_LIBRARY_DIR=/voices
-
-      # Memory management - aggressive for CPU
-      - MEMORY_CLEANUP_INTERVAL=${MEMORY_CLEANUP_INTERVAL:-3}
-      - CUDA_CACHE_CLEAR_INTERVAL=${CUDA_CACHE_CLEAR_INTERVAL:-2}
-      - ENABLE_MEMORY_MONITORING=${ENABLE_MEMORY_MONITORING:-true}
-
-      # CPU optimization environment variables
+      - MEMORY_CLEANUP_INTERVAL=3
+      - CUDA_CACHE_CLEAR_INTERVAL=2
+      - ENABLE_MEMORY_MONITORING=true
       - OMP_NUM_THREADS=8
       - MKL_NUM_THREADS=8
       - TORCH_NUM_THREADS=8
       - OPENBLAS_NUM_THREADS=8
       - VECLIB_MAXIMUM_THREADS=8
-
-      # PyTorch optimizations
       - TORCH_CUDNN_V8_API_ENABLED=1
       - PYTORCH_ENABLE_MPS_FALLBACK=1
-
-      # HuggingFace optimizations
       - HF_HUB_DISABLE_TELEMETRY=1
       - TRANSFORMERS_OFFLINE=0
       - HF_HUB_CACHE=/cache/huggingface
-
     volumes:
-      # Voice sample (from parent directory)
-      - ${VOICE_SAMPLE_HOST_PATH:-./voice-sample.mp3}:/app/voice-sample.mp3:ro
-
-      # Persistent model cache
+      - ./voice-sample.mp3:/app/voice-sample.mp3:ro
       - chatterbox-models:/cache
-
-      # Persistent voice library
       - chatterbox-voices:/voices
-
-      # Optional: Custom voice samples directory
-      - ${VOICE_SAMPLES_DIR:-./chatterbox-tts-api//voice-samples}:/app/voice-samples:ro
-
-    # Use tmpfs for temporary files to improve I/O performance
-    tmpfs:
-      - /tmp:size=1G,noexec,nosuid,nodev
-      - /var/tmp:size=512M,noexec,nosuid,nodev
-
-    # Optimize shared memory for better performance
-    shm_size: 2g
-
-    # Use host network mode for better performance (optional)
-    # network_mode: host  # Uncomment if you need maximum performance
-
     restart: unless-stopped
-
     healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:${PORT:-4123}/health"]
+      test: ["CMD", "curl", "-f", "http://localhost:4123/health"]
       interval: 45s
       timeout: 15s
       retries: 5
-      start_period: 10m  # Give it more time to initialize
-
-  # server:
-  #   build: ./server
-  #   ports:
-  #     - "8000:8000"
-  #   environment:
-  #     - REDIS_HOST=${REDIS_HOST:-localhost}
-  #     - REDIS_PORT=${REDIS_PORT:-6379}
-  #     - REDIS_DB=${REDIS_DB:-0}
-  #     - LOG_LEVEL=${LOG_LEVEL:-info}
-  #     - TTS_SERVICE_URL=${TTS_SERVICE_URL:-http://localhost:4123/v1/audio/speech}
-  #     - LLM_URL=${LLM_URL}
-  #     - LLM_API_KEY=${LLM_API_KEY}
-  #     - LLM_MODEL=${LLM_MODEL}
-  #   depends_on:
-  #     redis:
-  #       condition: service_healthy
-  #   restart: unless-stopped
-  #   user: "0"
-
-  frontend:
-    profiles: ["frontend", "ui", "fullstack"]
-    build:
-      context: ./chatterbox-tts-api/frontend
-      dockerfile: Dockerfile
-    container_name: chatterbox-tts-frontend
-    ports:
-      - "${FRONTEND_PORT:-4321}:80"
-    depends_on:
-      - chatterbox-tts
-    restart: unless-stopped
-
-  presenton:
-    image: ghcr.io/presenton/presenton:latest
-    container_name: presenton
-    user: "0"
-    ports:
-      - "${PRESENTON_PORT:-5001}:80"
-    environment:
-      # Core configuration
-      - APP_DATA_DIRECTORY=/app_data
-      - TEMP_DIRECTORY=/tmp/presenton
-      - CAN_CHANGE_KEYS=${PRESENTON_CAN_CHANGE_KEYS:-true}
-
-      # LLM Provider Configuration (choose one)
-      - LLM=${PRESENTON_LLM:-google}
-
-      - PRESENTON_CUSTOM_LLM_URL=${PRESENTON_CUSTOM_LLM_URL}
-      - PRESENTON_CUSTOM_MODEL=${PRESENTON_CUSTOM_MODEL}
-      - PRESENTON_CUSTOM_LLM_API_KEY=${PRESENTON_CUSTOM_LLM_API_KEY}
-      - PRESENTON_PEXELS_API_KEY=${PRESENTON_PEXELS_API_KEY}
-
-      # OpenAI Configuration
-      - OPENAI_API_KEY=${PRESENTON_OPENAI_API_KEY}
-      - OPENAI_MODEL=${PRESENTON_OPENAI_MODEL:-gpt-4-turbo}
-
-      # Google Configuration
-      - GOOGLE_API_KEY=${PRESENTON_CUSTOM_LLM_API_KEY}
-      - GOOGLE_MODEL=${PRESENTON_GOOGLE_MODEL:-gemini-2.0-flash}
-      - WEB_GROUNDING=${PRESENTON_WEB_GROUNDING:-false}
-
-      # Anthropic Configuration
-      - ANTHROPIC_API_KEY=${PRESENTON_ANTHROPIC_API_KEY}
-      - ANTHROPIC_MODEL=${PRESENTON_ANTHROPIC_MODEL:-claude-3-5-sonnet-20241022}
-
-      # Ollama Configuration (for local models)
-      - OLLAMA_URL=${PRESENTON_OLLAMA_URL:-http://localhost:11434}
-      - OLLAMA_MODEL=${PRESENTON_OLLAMA_MODEL:-llama3.2:3b}
-
-      # Custom LLM Configuration (for OpenAI-compatible APIs)
-      - CUSTOM_LLM_URL=${PRESENTON_CUSTOM_LLM_URL}
-      - CUSTOM_LLM_API_KEY=${PRESENTON_CUSTOM_LLM_API_KEY}
-      - CUSTOM_MODEL=${PRESENTON_CUSTOM_MODEL}
-
-      # Image Provider Configuration
-      - IMAGE_PROVIDER=${PRESENTON_IMAGE_PROVIDER:-dall-e-3}
-      - PEXELS_API_KEY=${PRESENTON_PEXELS_API_KEY}
-      - PIXABAY_API_KEY=${PRESENTON_PIXABAY_API_KEY}
-
-      # Advanced Features
-      - TOOL_CALLS=${PRESENTON_TOOL_CALLS:-false}
-      - DISABLE_THINKING=${PRESENTON_DISABLE_THINKING:-false}
-      - EXTENDED_REASONING=${PRESENTON_EXTENDED_REASONING:-false}
-      - USE_CUSTOM_URL=${PRESENTON_USE_CUSTOM_URL:-false}
-    volumes:
-      - presenton_data:/app_data
-    restart: unless-stopped
-    healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:80/"]
-      interval: 30s
-      timeout: 10s
-      retries: 3
-      start_period: 60s
+      start_period: 10m
 
 volumes:
-  redis_data:
   chatterbox-models:
   chatterbox-voices:
-  presenton_data:
 
 networks:
   default:
-    driver: bridge
-    driver_opts:
-      com.docker.network.driver.mtu: 1500
