@@ -1,5 +1,7 @@
+import heapq
+import random
 import logging
-from typing import Dict
+from typing import Dict, Set
 import asyncio
 
 from app.asset_router import generate_visual_asset, exponential_backoff_retry
@@ -66,12 +68,8 @@ async def create_video_job(job_id: str, file: FileContext) -> None:
         successful_tasks = sum(1 for result in results if not isinstance(result, Exception))
         failed_tasks = len(results) - successful_tasks
 
-        logger.info("Video job processing completed", extra={
-            "job_id": job_id,
-            "total_tasks": len(tasks),
-            "successful_tasks": successful_tasks,
-            "failed_tasks": failed_tasks
-        })
+            for scene in script_scenes:
+                scene_id = scene["id"]
 
         if failed_tasks > 0:
             await job_service.set_job_status(

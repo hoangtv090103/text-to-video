@@ -8,7 +8,10 @@ from enum import Enum
 from typing import Dict, Optional, Callable, Any
 from fastapi import FastAPI, BackgroundTasks, HTTPException, UploadFile, File
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.middleware.gzip import GZipMiddleware
+from fastapi.responses import JSONResponse
 from contextlib import asynccontextmanager
+import time
 
 from app.core.logging_config import setup_logging
 from app.core.config import settings
@@ -146,6 +149,18 @@ async def startup_health_checks() -> None:
     logger.info("All dependency health checks passed")
 
 
+def ensure_storage_directories():
+    """Ensure persistent storage directories exist."""
+    import os
+    directories = [
+        settings.ASSET_STORAGE_PATH,
+        settings.VIDEO_OUTPUT_PATH,
+        settings.VISUAL_STORAGE_PATH
+    ]
+    for directory in directories:
+        os.makedirs(directory, exist_ok=True)
+        logger.info(f"Ensured storage directory exists: {directory}")
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     setup_logging()
@@ -185,7 +200,8 @@ async def health_check():
             "service": "text-to-video",
             "dependencies": {
                 "tts_service": "healthy" if tts_healthy else "unhealthy",
-                "llm_service": "healthy" if llm_healthy else "unhealthy"
+                "llm_service": "healthy" if llm_healthy else "unhealthy",
+                "redis_service": "healthy" if redis_healthy else "unhealthy"
             },
             "timestamp": time.time()
         }
@@ -235,6 +251,9 @@ async def generate_video(background_tasks: BackgroundTasks, file: UploadFile = F
 @app.get("/api/v1/video/status/{job_id}", response_model=JobStatusResponse)
 async def get_job_status(job_id: str):
     try:
+        # Validate job ID format
+        validate_job_id(job_id)
+        
         logger.info("Job status requested", extra={"job_id": job_id})
         job_data = await job_service.get_job_status(job_id)
         if not job_data:

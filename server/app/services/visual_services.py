@@ -1,17 +1,34 @@
 import asyncio
 import os
 import logging
+import aiofiles
 import matplotlib
 matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 import matplotlib.patches as mpatches
 import numpy as np
 
+from app.core.config import settings
+
 logger = logging.getLogger(__name__)
 
 # Asset storage configuration
-ASSET_STORAGE_PATH = os.environ.get("ASSET_STORAGE_PATH", "/tmp/visuals")
+ASSET_STORAGE_PATH = settings.VISUAL_STORAGE_PATH
 os.makedirs(ASSET_STORAGE_PATH, exist_ok=True)
+
+async def async_savefig(plt_instance, output_file: str, **kwargs):
+    """Async wrapper for matplotlib savefig to avoid blocking."""
+    import concurrent.futures
+    import threading
+    
+    def _save():
+        plt_instance.savefig(output_file, **kwargs)
+        plt_instance.close()  # Clean up to save memory
+    
+    # Use thread pool to make savefig non-blocking
+    loop = asyncio.get_event_loop()
+    with concurrent.futures.ThreadPoolExecutor(max_workers=2) as executor:
+        await loop.run_in_executor(executor, _save)
 
 
 async def call_presenton_api(visual_prompt: str, job_id: str, scene_id: int) -> str:
@@ -24,6 +41,13 @@ async def call_presenton_api(visual_prompt: str, job_id: str, scene_id: int) -> 
 
     output_file = os.path.join(
         ASSET_STORAGE_PATH, f"job_{job_id}_scene_{scene_id}_slide.png")
+
+    # Check cache first for visual assets
+    from app.utils.cache import get_from_cache, set_cache
+    cached_result = await get_from_cache("visual", visual_prompt)
+    if cached_result and os.path.exists(cached_result):
+        logger.info("Using cached visual asset", extra={"cached_path": cached_result})
+        return cached_result
 
     try:
         # Get Presenton service URL from environment or use default
@@ -60,15 +84,16 @@ async def call_presenton_api(visual_prompt: str, job_id: str, scene_id: int) -> 
                 raise Exception("No presentation path returned from Presenton API")
 
             # Download the generated presentation file
-            download_response = await client.get(f"{presenton_url}{presentation_path}")
-
-            if download_response.status_code != 200:
-                raise Exception(f"Failed to download presentation: {download_response.status_code}")
-
-            # Save the PDF temporarily
+            # Save the PDF temporarily with streaming download
             temp_pdf_path = os.path.join(ASSET_STORAGE_PATH, f"temp_{job_id}_{scene_id}.pdf")
-            with open(temp_pdf_path, 'wb') as f:
-                f.write(download_response.content)
+            
+            async with client.stream("GET", f"{presenton_url}{presentation_path}") as download_response:
+                if download_response.status_code != 200:
+                    raise Exception(f"Failed to download presentation: {download_response.status_code}")
+                
+                async with aiofiles.open(temp_pdf_path, 'wb') as f:
+                    async for chunk in download_response.aiter_bytes(chunk_size=8192):
+                        await f.write(chunk)
 
             # Convert first page of PDF to PNG using subprocess
             def convert_pdf_to_png():
@@ -131,6 +156,9 @@ async def call_presenton_api(visual_prompt: str, job_id: str, scene_id: int) -> 
                 "output_file": output_file
             })
 
+            # Cache the successful result
+            await set_cache("visual", visual_prompt, output_file)
+
     except Exception as e:
         logger.error("Failed to generate slide via Presenton API, using fallback", extra={
             "scene_id": scene_id,
@@ -170,13 +198,16 @@ async def call_presenton_api(visual_prompt: str, job_id: str, scene_id: int) -> 
             ax.add_patch(brand_rect)
 
             plt.tight_layout()
-            plt.savefig(output_file, dpi=150, bbox_inches='tight', facecolor='white')
-            plt.close()
-
+            
         # Run fallback in executor
         loop = asyncio.get_running_loop()
         await loop.run_in_executor(None, create_fallback_slide)
+        
+        # Save asynchronously
+        await async_savefig(plt, output_file, dpi=150, bbox_inches='tight', facecolor='white')
 
+    # Cache the result (both success and fallback)
+    await set_cache("visual", visual_prompt, output_file)
     return output_file
 async def render_diagram(visual_prompt: str, job_id: str, scene_id: int) -> str:
     """Renders a diagram using Mermaid service."""
@@ -228,11 +259,15 @@ async def render_diagram(visual_prompt: str, job_id: str, scene_id: int) -> str:
                fontsize=14, style='italic')
 
         plt.tight_layout()
-        plt.savefig(output_file, dpi=150, bbox_inches='tight', facecolor='white')
-        plt.close()
 
     loop = asyncio.get_running_loop()
     await loop.run_in_executor(None, create_diagram)
+    
+    # Save asynchronously after creation
+    await async_savefig(plt, output_file, dpi=150, bbox_inches='tight', facecolor='white')
+    
+    # Cache the result
+    await set_cache("visual", visual_prompt, output_file)
     return output_file
 
 
@@ -240,6 +275,13 @@ async def generate_graph(visual_prompt: str, job_id: str, scene_id: int) -> str:
     """Generates a chart/graph using matplotlib with enhanced features."""
     output_file = os.path.join(
         ASSET_STORAGE_PATH, f"job_{job_id}_scene_{scene_id}_chart.png")
+
+    # Check cache first
+    from app.utils.cache import get_from_cache, set_cache
+    cached_result = await get_from_cache("visual", visual_prompt)
+    if cached_result and os.path.exists(cached_result):
+        logger.info("Using cached visual asset", extra={"cached_path": cached_result})
+        return cached_result
 
     def create_chart():
         fig, ax = plt.subplots(figsize=(12, 8), facecolor='white')
@@ -289,6 +331,9 @@ async def generate_graph(visual_prompt: str, job_id: str, scene_id: int) -> str:
 
     loop = asyncio.get_running_loop()
     await loop.run_in_executor(None, create_chart)
+    
+    # Cache the result
+    await set_cache("visual", visual_prompt, output_file)
     return output_file
 
 
@@ -346,6 +391,9 @@ async def render_formula(visual_prompt: str, job_id: str, scene_id: int) -> str:
 
     loop = asyncio.get_running_loop()
     await loop.run_in_executor(None, create_formula)
+    
+    # Cache the result
+    await set_cache("visual", visual_prompt, output_file)
     return output_file
 
 
@@ -441,6 +489,9 @@ def generate_visual_asset(scene):
 
     loop = asyncio.get_running_loop()
     await loop.run_in_executor(None, create_code)
+    
+    # Cache the result
+    await set_cache("visual", visual_prompt, output_file)
     return output_file
 
 

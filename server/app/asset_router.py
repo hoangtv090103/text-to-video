@@ -13,6 +13,7 @@ from app.services.visual_services import (
     render_formula,
     render_code
 )
+from app.core.config import settings
 
 logger = logging.getLogger(__name__)
 
@@ -83,7 +84,7 @@ async def generate_visual_asset(scene: Dict, job_id: str = "unknown") -> Dict:
     try:
         # Create an output directory if it doesn't exist
         import os
-        os.makedirs("/tmp/visuals", exist_ok=True)
+        os.makedirs(settings.VISUAL_STORAGE_PATH, exist_ok=True)
 
         # Route to the appropriate visual service based on type
         if visual_type == "slide":
@@ -165,7 +166,7 @@ async def _create_error_placeholder(scene_id: str, visual_type: str, error: str)
     try:
 
         # Ensure output directory exists
-        os.makedirs("/tmp/visuals", exist_ok=True)
+        os.makedirs(settings.VISUAL_STORAGE_PATH, exist_ok=True)
 
         # Create error placeholder
         fig, ax = plt.subplots(figsize=(10, 6), facecolor='#ffebee')
@@ -191,7 +192,7 @@ async def _create_error_placeholder(scene_id: str, visual_type: str, error: str)
                                   edgecolor='#f44336', linewidth=3, linestyle='--')
         ax.add_patch(border)
 
-        placeholder_path = f"/tmp/visuals/error_scene_{scene_id}_{visual_type}.png"
+        placeholder_path = f"{settings.VISUAL_STORAGE_PATH}/error_scene_{scene_id}_{visual_type}.png"
         plt.tight_layout()
         plt.savefig(placeholder_path, dpi=150, bbox_inches='tight', facecolor='#ffebee')
         plt.close()
@@ -205,4 +206,4 @@ async def _create_error_placeholder(scene_id: str, visual_type: str, error: str)
             "visual_type": visual_type,
             "placeholder_error": str(create_error)
         })
-        return f"/tmp/visuals/fallback_placeholder_scene_{scene_id}.png"
+        return f"{settings.VISUAL_STORAGE_PATH}/fallback_placeholder_scene_{scene_id}.png"

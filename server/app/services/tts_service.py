@@ -1,6 +1,7 @@
 import httpx
 import os
 import logging
+import aiofiles
 from typing import Dict
 from uuid import uuid4
 from pydub import AudioSegment
@@ -11,7 +12,21 @@ CHATTERBOX_API_URL = settings.TTS_SERVICE_URL
 
 logger = logging.getLogger(__name__)
 
-ASSET_STORAGE_PATH = "/tmp/assets"
+ASSET_STORAGE_PATH = settings.ASSET_STORAGE_PATH
+
+# Shared HTTP client with connection pooling
+_tts_client = None
+
+def get_tts_client():
+    """Get or create shared HTTP client with connection pooling."""
+    global _tts_client
+    if _tts_client is None or _tts_client.is_closed:
+        timeout_config = httpx.Timeout(
+            connect=10.0, read=60.0, write=10.0, pool=5.0
+        )
+        limits = httpx.Limits(max_keepalive_connections=5, max_connections=10)
+        _tts_client = httpx.AsyncClient(timeout=timeout_config, limits=limits)
+    return _tts_client
 
 @exponential_backoff_retry(max_retries=3, base_delay=1.0)
 async def generate_audio(scene: Dict) -> Dict:
@@ -39,6 +54,12 @@ async def generate_audio(scene: Dict) -> Dict:
             "duration": 0
         }
 
+    # Check cache first for TTS audio
+    from app.utils.cache import get_from_cache, set_cache
+    cached_result = await get_from_cache("tts", text_input)
+    if cached_result:
+        return cached_result
+
     payload = {
         "input": text_input,
         "voice": "alloy",
@@ -49,32 +70,38 @@ async def generate_audio(scene: Dict) -> Dict:
         "temperature": 0.3,    # Higher values = faster generation
     }
 
-    # Use httpx for asynchronous calls with increased timeout
-    async with httpx.AsyncClient(timeout=300) as client:
-        response = await client.post(f"{CHATTERBOX_API_URL}", json=payload)
+    # Use shared HTTP client with connection pooling
+    client = get_tts_client()
+    
+    # Ensure asset storage directory exists
+    os.makedirs(ASSET_STORAGE_PATH, exist_ok=True)
+
+    # Generate unique file path
+    file_path = os.path.join(ASSET_STORAGE_PATH, f"segment_{seg_id}_{uuid4()}.wav")
+
+    # Stream download and save asynchronously for better memory usage
+    async with client.stream("POST", f"{CHATTERBOX_API_URL}", json=payload) as response:
         response.raise_for_status()
+        async with aiofiles.open(file_path, "wb") as f:
+            async for chunk in response.aiter_bytes(chunk_size=8192):
+                await f.write(chunk)
 
-        # Ensure asset storage directory exists
-        os.makedirs(ASSET_STORAGE_PATH, exist_ok=True)
+    logger.info(f"Successfully saved TTS audio to {file_path}", extra={"segment_id": seg_id})
 
-        # Generate unique file path
-        file_path = os.path.join(ASSET_STORAGE_PATH, f"segment_{seg_id}_{uuid4()}.wav")
+    # Get the duration of the audio file
+    duration = await get_audio_duration(file_path)
+    logger.info("Successfully retrieved duration of TTS audio", extra={"segment_id": seg_id, "duration": duration})
 
-        # Save audio file
-        with open(file_path, "wb") as f:
-            f.write(response.content)
-
-        logger.info(f"Successfully saved TTS audio to {file_path}", extra={"segment_id": seg_id})
-
-        # Get the duration of the audio file
-        duration = await get_audio_duration(file_path)
-        logger.info("Successfully retrieved duration of TTS audio", extra={"segment_id": seg_id, "duration": duration})
-
-    return {
+    result = {
         "path": file_path,
         "duration": duration,
         "status": "success"
     }
+    
+    # Cache the result
+    await set_cache("tts", text_input, result)
+    
+    return result
 
 async def get_audio_duration(file_path):
     try:
@@ -82,5 +109,9 @@ async def get_audio_duration(file_path):
         duration = audio.duration_seconds
         return duration
     except Exception as e:
-        logger.error(f"Failed to get duration of audio file {file_path}", extra={"error": str(e)})
+        logger.error("Failed to get audio duration", extra={
+            "error_type": type(e).__name__,
+            "error": str(e),
+            "file_path": file_path
+        })
         return None
