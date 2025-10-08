@@ -4,6 +4,7 @@ import { useState, useEffect } from 'react'
 import { Play, Pause, Square, CheckCircle, XCircle, AlertCircle, Clock, Loader2 } from 'lucide-react'
 import { useVideoGeneration } from '@/hooks/useVideoGeneration'
 import { JobStatusResponse } from '@/types/api'
+import { VideoPlayer } from './VideoPlayer'
 
 interface JobStatusProps {
     jobId: string
@@ -182,9 +183,26 @@ export const JobStatus = ({ jobId, onStatusChange }: JobStatusProps) => {
             {job.result && (
                 <div className="mt-4 pt-4 border-t border-gray-200">
                     <h4 className="text-sm font-medium text-gray-700 mb-2">Result Details:</h4>
-                    <pre className="text-xs text-gray-600 bg-gray-50 p-3 rounded overflow-auto max-h-32">
-                        {JSON.stringify(job.result, null, 2)}
-                    </pre>
+
+                    {/* Video Display Section */}
+                    {job.result.video && job.result.video.video_url && (
+                        <div className="mb-4">
+                            <VideoPlayer
+                                video={job.result.video}
+                                jobId={jobId}
+                            />
+                        </div>
+                    )}
+
+                    {/* Raw Result Data (for debugging) */}
+                    <details className="mt-4">
+                        <summary className="text-xs text-gray-500 cursor-pointer hover:text-gray-700">
+                            Show raw result data
+                        </summary>
+                        <pre className="text-xs text-gray-600 bg-gray-50 p-3 rounded overflow-auto max-h-32 mt-2">
+                            {JSON.stringify(job.result, null, 2)}
+                        </pre>
+                    </details>
                 </div>
             )}
         </div>

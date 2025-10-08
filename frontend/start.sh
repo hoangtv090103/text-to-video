@@ -35,3 +35,4 @@ echo "🔗 Make sure the backend server is running on port 8000"
 echo ""
 
 npm run dev
+

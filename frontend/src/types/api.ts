@@ -1,13 +1,10 @@
-export interface JobStatus {
-  PENDING: 'pending'
-  PROCESSING: 'processing'
-  COMPLETED: 'completed'
-  COMPLETED_WITH_ERRORS: 'completed_with_errors'
-  FAILED: 'failed'
-  CANCELLED: 'cancelled'
-}
-
-export type JobStatusType = keyof JobStatus
+export type JobStatusType =
+  | 'pending'
+  | 'processing'
+  | 'completed'
+  | 'completed_with_errors'
+  | 'failed'
+  | 'cancelled'
 
 export interface JobData {
   job_id: string
@@ -20,6 +17,29 @@ export interface JobData {
   segments?: Record<string, any>
 }
 
+export interface VideoResult {
+  video_path: string
+  video_url?: string
+  download_url?: string
+  duration?: number
+  file_size_mb?: number
+  status: string
+}
+
+export interface JobResult {
+  job_id: string
+  status: string
+  message: string
+  processing_time: number
+  total_scenes: number
+  successful_tasks: number
+  failed_tasks: number
+  scenes: any[]
+  script_scenes: any[]
+  video?: VideoResult
+  error?: string
+}
+
 export interface JobStatusResponse {
   job_id: string
   status: JobStatusType
@@ -27,7 +47,7 @@ export interface JobStatusResponse {
   progress?: number
   updated_at?: string
   completed_at?: string
-  result?: any
+  result?: JobResult
 }
 
 export interface VideoGenerationRequest {
@@ -76,4 +96,70 @@ export interface HealthResponse {
 export interface ApiError {
   detail: string
   status_code?: number
+}
+
+// Admin LLM Configuration Types
+export interface LLMProviderInfo {
+  provider: string
+  supported: boolean
+  required_packages: string[]
+  configuration: Record<string, any>
+}
+
+export interface LLMProvidersResponse {
+  available_providers: string[]
+  current_provider: string
+  current_config: LLMProviderInfo
+  supported_models: Record<string, string[]>
+}
+
+export interface LLMHealthResponse {
+  provider: string
+  healthy: boolean
+  provider_info: LLMProviderInfo
+  current_model: string
+  timestamp: number
+}
+
+export interface LLMTestResponse {
+  success: boolean
+  provider: string
+  model: string
+  test_response: string
+  error?: string
+  timestamp: number
+}
+
+export interface SetProviderResponse {
+  message: string
+  provider: string
+  note: string
+}
+
+// Model Cache Types
+export interface ModelCacheInfo {
+  cached_providers: string[]
+  cache_timestamps: Record<string, string>
+  cache_duration_hours: number
+}
+
+export interface CacheClearResponse {
+  message: string
+  provider?: string
+  cache_info: ModelCacheInfo
+  timestamp: number
+}
+
+export interface CacheInfoResponse {
+  cache_info: ModelCacheInfo
+  timestamp: number
+}
+
+export interface RefreshModelsResponse {
+  message: string
+  provider: string
+  models_count: number
+  models: string[]
+  cache_info: ModelCacheInfo
+  timestamp: number
 }

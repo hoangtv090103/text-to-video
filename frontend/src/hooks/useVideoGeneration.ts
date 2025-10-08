@@ -6,6 +6,8 @@ export interface UseVideoGenerationReturn {
   generateVideo: (file: File) => Promise<JobStatusResponse>
   getJobStatus: (jobId: string) => Promise<JobStatusResponse>
   cancelJob: (jobId: string, reason?: string) => Promise<void>
+  downloadVideo: (jobId: string, download?: boolean) => Promise<Blob>
+  getVideoUrl: (jobId: string, download?: boolean) => string
   isLoading: boolean
   error: string | null
   currentJob: JobStatusResponse | null
@@ -71,10 +73,26 @@ export const useVideoGeneration = (): UseVideoGenerationReturn => {
     }
   }, [currentJob])
 
+  const downloadVideo = useCallback(async (jobId: string, download = false): Promise<Blob> => {
+    try {
+      return await videoApi.downloadVideo(jobId, download)
+    } catch (err) {
+      const errorMessage = err instanceof Error ? err.message : 'Failed to download video'
+      setError(errorMessage)
+      throw new Error(errorMessage)
+    }
+  }, [])
+
+  const getVideoUrl = useCallback((jobId: string, download = false): string => {
+    return videoApi.getVideoUrl(jobId, download)
+  }, [])
+
   return {
     generateVideo,
     getJobStatus,
     cancelJob,
+    downloadVideo,
+    getVideoUrl,
     isLoading,
     error,
     currentJob,
