@@ -1,7 +1,7 @@
 import logging
-from typing import Dict
-from concurrent.futures import ThreadPoolExecutor, as_completed
 import time
+from concurrent.futures import ThreadPoolExecutor, as_completed
+from typing import Dict
 
 from app.utils.file import FileContext
 
@@ -20,10 +20,10 @@ def create_video_job_sync(job_id: str, file: FileContext) -> Dict:
     Returns:
         Dict containing job result and status
     """
-    logger.info("Starting synchronous video job creation", extra={
-        "job_id": job_id,
-        "file_name": file.filename
-    })
+    logger.info(
+        "Starting synchronous video job creation",
+        extra={"job_id": job_id, "uploaded_file": file.filename},
+    )
 
     start_time = time.time()
 
@@ -31,12 +31,13 @@ def create_video_job_sync(job_id: str, file: FileContext) -> Dict:
         # Step 1: Generate script from source text using LLM service
         logger.info("Generating script from source text")
         from app.services.llm_service_sync import generate_script_sync
+
         script_scenes = generate_script_sync(file)
 
-        logger.info("Script generated successfully", extra={
-            "job_id": job_id,
-            "total_scenes": len(script_scenes)
-        })
+        logger.info(
+            "Script generated successfully",
+            extra={"job_id": job_id, "total_scenes": len(script_scenes)},
+        )
 
         # Step 2: Process each scene with parallel audio and visual generation
         logger.info("Starting parallel asset generation using ThreadPoolExecutor")
@@ -52,19 +53,11 @@ def create_video_job_sync(job_id: str, file: FileContext) -> Dict:
                 scene_id = scene["id"]
 
                 # Submit audio generation task
-                audio_future = executor.submit(
-                    _process_audio_asset_sync,
-                    job_id,
-                    scene
-                )
+                audio_future = executor.submit(_process_audio_asset_sync, job_id, scene)
                 future_to_task[audio_future] = ("audio", scene_id)
 
                 # Submit visual generation task
-                visual_future = executor.submit(
-                    _process_visual_asset_sync,
-                    job_id,
-                    scene
-                )
+                visual_future = executor.submit(_process_visual_asset_sync, job_id, scene)
                 future_to_task[visual_future] = ("visual", scene_id)
 
             # Collect results as they complete
@@ -78,30 +71,32 @@ def create_video_job_sync(job_id: str, file: FileContext) -> Dict:
                     result = future.result()
                     if result and result.get("status") != "failed":
                         successful_tasks += 1
-                        all_assets.append({
-                            "scene_id": scene_id,
-                            "asset_type": asset_type,
-                            "data": result
-                        })
-                        logger.info(f"{asset_type.capitalize()} asset completed", extra={
-                            "job_id": job_id,
-                            "scene_id": scene_id
-                        })
+                        all_assets.append(
+                            {"scene_id": scene_id, "asset_type": asset_type, "data": result}
+                        )
+                        logger.info(
+                            f"{asset_type.capitalize()} asset completed",
+                            extra={"job_id": job_id, "scene_id": scene_id},
+                        )
                     else:
                         failed_tasks += 1
-                        logger.error(f"{asset_type.capitalize()} asset failed", extra={
-                            "job_id": job_id,
-                            "scene_id": scene_id,
-                            "error": result.get("error", "Unknown error") if result else "No result"
-                        })
+                        logger.error(
+                            f"{asset_type.capitalize()} asset failed",
+                            extra={
+                                "job_id": job_id,
+                                "scene_id": scene_id,
+                                "error": result.get("error", "Unknown error")
+                                if result
+                                else "No result",
+                            },
+                        )
 
                 except Exception as e:
                     failed_tasks += 1
-                    logger.error(f"{asset_type.capitalize()} task failed with exception", extra={
-                        "job_id": job_id,
-                        "scene_id": scene_id,
-                        "error": str(e)
-                    })
+                    logger.error(
+                        f"{asset_type.capitalize()} task failed with exception",
+                        extra={"job_id": job_id, "scene_id": scene_id, "error": str(e)},
+                    )
 
         # Step 3: Prepare final result
         end_time = time.time()
@@ -112,22 +107,21 @@ def create_video_job_sync(job_id: str, file: FileContext) -> Dict:
         for asset in all_assets:
             scene_id = asset["scene_id"]
             if scene_id not in scenes_with_assets:
-                scenes_with_assets[scene_id] = {
-                    "scene_id": scene_id,
-                    "audio": None,
-                    "visual": None
-                }
+                scenes_with_assets[scene_id] = {"scene_id": scene_id, "audio": None, "visual": None}
             scenes_with_assets[scene_id][asset["asset_type"]] = asset["data"]
 
         # Log completion statistics
         total_tasks = successful_tasks + failed_tasks
-        logger.info("Video job processing completed", extra={
-            "job_id": job_id,
-            "total_tasks": total_tasks,
-            "successful_tasks": successful_tasks,
-            "failed_tasks": failed_tasks,
-            "processing_time": f"{total_time:.2f}s"
-        })
+        logger.info(
+            "Video job processing completed",
+            extra={
+                "job_id": job_id,
+                "total_tasks": total_tasks,
+                "successful_tasks": successful_tasks,
+                "failed_tasks": failed_tasks,
+                "processing_time": f"{total_time:.2f}s",
+            },
+        )
 
         # Step 3: Video Composition - Combine audio and visual assets into final video
         logger.info("Starting video composition (Phase 3)")
@@ -138,18 +132,20 @@ def create_video_job_sync(job_id: str, file: FileContext) -> Dict:
             # Only proceed with composition if we have valid scenes
             if scenes_with_assets:
                 composition_result = compose_video_sync(
-                    scenes_with_assets=list(scenes_with_assets.values()),
-                    job_id=job_id
+                    scenes_with_assets=list(scenes_with_assets.values()), job_id=job_id
                 )
 
                 # Update final result with video composition info
                 if composition_result.get("status") == "success":
-                    logger.info("Video composition completed successfully", extra={
-                        "job_id": job_id,
-                        "video_path": composition_result.get("video_path"),
-                        "video_duration": composition_result.get("duration"),
-                        "file_size_mb": composition_result.get("file_size_mb")
-                    })
+                    logger.info(
+                        "Video composition completed successfully",
+                        extra={
+                            "job_id": job_id,
+                            "video_path": composition_result.get("video_path"),
+                            "video_duration": composition_result.get("duration"),
+                            "file_size_mb": composition_result.get("file_size_mb"),
+                        },
+                    )
 
                     final_result = {
                         "job_id": job_id,
@@ -161,13 +157,13 @@ def create_video_job_sync(job_id: str, file: FileContext) -> Dict:
                         "processing_time": total_time,
                         "scenes": list(scenes_with_assets.values()),
                         "script_scenes": script_scenes,
-                        "video": composition_result  # Include video composition result
+                        "video": composition_result,  # Include video composition result
                     }
                 else:
-                    logger.error("Video composition failed", extra={
-                        "job_id": job_id,
-                        "error": composition_result.get("error")
-                    })
+                    logger.error(
+                        "Video composition failed",
+                        extra={"job_id": job_id, "error": composition_result.get("error")},
+                    )
 
                     final_result = {
                         "job_id": job_id,
@@ -179,7 +175,7 @@ def create_video_job_sync(job_id: str, file: FileContext) -> Dict:
                         "processing_time": total_time,
                         "scenes": list(scenes_with_assets.values()),
                         "script_scenes": script_scenes,
-                        "composition_error": composition_result.get("error")
+                        "composition_error": composition_result.get("error"),
                     }
             else:
                 logger.warning("No valid scenes for video composition", extra={"job_id": job_id})
@@ -192,14 +188,14 @@ def create_video_job_sync(job_id: str, file: FileContext) -> Dict:
                     "failed_tasks": failed_tasks,
                     "processing_time": total_time,
                     "scenes": list(scenes_with_assets.values()),
-                    "script_scenes": script_scenes
+                    "script_scenes": script_scenes,
                 }
 
         except ImportError:
-            logger.error("Video composition module not available", extra={
-                "job_id": job_id,
-                "error": "MoviePy not installed"
-            })
+            logger.error(
+                "Video composition module not available",
+                extra={"job_id": job_id, "error": "MoviePy not installed"},
+            )
 
             # Fallback: return results without video composition
             final_result = {
@@ -212,13 +208,13 @@ def create_video_job_sync(job_id: str, file: FileContext) -> Dict:
                 "processing_time": total_time,
                 "scenes": list(scenes_with_assets.values()),
                 "script_scenes": script_scenes,
-                "composition_error": "MoviePy not installed"
+                "composition_error": "MoviePy not installed",
             }
         except Exception as composition_error:
-            logger.error("Video composition module error", extra={
-                "job_id": job_id,
-                "error": str(composition_error)
-            })
+            logger.error(
+                "Video composition module error",
+                extra={"job_id": job_id, "error": str(composition_error)},
+            )
 
             # Fallback: return results without video composition
             final_result = {
@@ -231,7 +227,7 @@ def create_video_job_sync(job_id: str, file: FileContext) -> Dict:
                 "processing_time": total_time,
                 "scenes": list(scenes_with_assets.values()),
                 "script_scenes": script_scenes,
-                "composition_error": str(composition_error)
+                "composition_error": str(composition_error),
             }
 
         return final_result
@@ -240,18 +236,17 @@ def create_video_job_sync(job_id: str, file: FileContext) -> Dict:
         end_time = time.time()
         total_time = end_time - start_time
 
-        logger.error("Video job creation failed", extra={
-            "job_id": job_id,
-            "error": str(e),
-            "processing_time": f"{total_time:.2f}s"
-        })
+        logger.error(
+            "Video job creation failed",
+            extra={"job_id": job_id, "error": str(e), "processing_time": f"{total_time:.2f}s"},
+        )
 
         return {
             "job_id": job_id,
             "status": "failed",
             "message": f"Job failed: {str(e)}",
             "processing_time": total_time,
-            "error": str(e)
+            "error": str(e),
         }
 
 
@@ -269,35 +264,24 @@ def _process_audio_asset_sync(job_id: str, scene: Dict) -> Dict:
     scene_id = scene["id"]
 
     try:
-        logger.debug("Starting audio processing", extra={
-            "job_id": job_id,
-            "scene_id": scene_id
-        })
+        logger.debug("Starting audio processing", extra={"job_id": job_id, "scene_id": scene_id})
 
         # Generate audio asset using synchronous service
         from app.services.tts_service_sync import generate_audio_sync
+
         audio_data = generate_audio_sync(scene)
 
-        logger.debug("Audio processing completed", extra={
-            "job_id": job_id,
-            "scene_id": scene_id
-        })
+        logger.debug("Audio processing completed", extra={"job_id": job_id, "scene_id": scene_id})
 
         return audio_data
 
     except Exception as e:
-        logger.error("Audio processing failed", extra={
-            "job_id": job_id,
-            "scene_id": scene_id,
-            "error": str(e)
-        })
+        logger.error(
+            "Audio processing failed",
+            extra={"job_id": job_id, "scene_id": scene_id, "error": str(e)},
+        )
 
-        return {
-            "path": "",
-            "duration": 0,
-            "status": "failed",
-            "error": str(e)
-        }
+        return {"path": "", "duration": 0, "status": "failed", "error": str(e)}
 
 
 def _process_visual_asset_sync(job_id: str, scene: Dict) -> Dict:
@@ -314,32 +298,26 @@ def _process_visual_asset_sync(job_id: str, scene: Dict) -> Dict:
     scene_id = scene["id"]
 
     try:
-        logger.debug("Starting visual processing", extra={
-            "job_id": job_id,
-            "scene_id": scene_id
-        })
+        logger.debug("Starting visual processing", extra={"job_id": job_id, "scene_id": scene_id})
 
         # Generate visual asset using synchronous service
         from app.services.visual_services_sync import generate_visual_asset_sync
+
         visual_data = generate_visual_asset_sync(scene, job_id)
 
-        logger.debug("Visual processing completed", extra={
-            "job_id": job_id,
-            "scene_id": scene_id
-        })
+        logger.debug("Visual processing completed", extra={"job_id": job_id, "scene_id": scene_id})
 
         return visual_data
 
     except Exception as e:
-        logger.error("Visual processing failed", extra={
-            "job_id": job_id,
-            "scene_id": scene_id,
-            "error": str(e)
-        })
+        logger.error(
+            "Visual processing failed",
+            extra={"job_id": job_id, "scene_id": scene_id, "error": str(e)},
+        )
 
         return {
             "path": "",
             "status": "failed",
             "visual_type": scene.get("visual_type", "unknown"),
-            "error": str(e)
+            "error": str(e),
         }

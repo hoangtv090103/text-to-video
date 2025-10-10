@@ -1,16 +1,18 @@
 services:
-  # redis:
-  #   image: redis:7-alpine
-  #   ports:
-  #     - "6379:6379"
-  #   command: redis-server --appendonly yes
-  #   volumes:
-  #     - redis_data:/data
-  #   healthcheck:
-  #     test: ["CMD", "redis-cli", "ping"]
-  #     interval: 30s
-  #     timeout: 3s
-  #     retries: 3
+  redis:
+    image: redis:7-alpine
+    container_name: text-to-video-redis
+    ports:
+      - "6379:6379"
+    command: redis-server --appendonly yes
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 30s
+      timeout: 3s
+      retries: 3
+    restart: unless-stopped
 
   # Chatterbox TTS API - Optimized for macOS Docker
   chatterbox-tts:
@@ -19,7 +21,8 @@ services:
       dockerfile: docker/Dockerfile.mps
     container_name: chatterbox-tts-api-macos
     ports:
-      - '${PORT:-4123}:${PORT:-4123}'
+      # Use an explicit host:container mapping to avoid accidental overrides from the host env
+      - "4123:4123"
 
     # Optimize resource allocation for ARM64 macOS
     deploy:
@@ -36,8 +39,9 @@ services:
 
     environment:
       # API Configuration
-      - PORT=${PORT:-4123}
-      - HOST=${HOST:-0.0.0.0}
+      # Use explicit values to ensure the service binds to all interfaces inside the container
+      - PORT=4123
+      - HOST=0.0.0.0
 
       # TTS Model Settings - optimized for CPU
       - EXAGGERATION=${EXAGGERATION:-0.5}
@@ -108,32 +112,42 @@ services:
       retries: 5
       start_period: 10m  # Give it more time to initialize
 
-  server:
-    build: ./server
-    ports:
-      - "8000:8000"
-    environment:
-      - LOG_LEVEL=${LOG_LEVEL:-info}
-      - TTS_SERVICE_URL=${TTS_SERVICE_URL:-http://localhost:4123/v1/audio/speech}
-      - LLM_URL=${LLM_URL}
-      - LLM_API_KEY=${LLM_API_KEY}
-      - LLM_MODEL=${LLM_MODEL}
-    depends_on:
-      - chatterbox-tts
-    restart: unless-stopped
-    user: "0"
+  # server:
+  #   build: ./server
+  #   ports:
+  #     - "8000:8000"
+  #   environment:
+  #     - LOG_LEVEL=${LOG_LEVEL:-info}
+  #     - LLM_URL=${LLM_URL}
+  #     - LLM_API_KEY=${LLM_API_KEY}
+  #     - LLM_MODEL=${LLM_MODEL}
+  #     - LLM_PROVIDER=${LLM_PROVIDER:-openai}
+  #     - OPENAI_API_KEY=${OPENAI_API_KEY}
+  #     - OPENAI_MODEL=${OPENAI_MODEL:-gpt-3.5-turbo}
+  #     - GOOGLE_API_KEY=${GOOGLE_API_KEY}
+  #     - GOOGLE_MODEL=${GOOGLE_MODEL:-gemini-pro}
+  #     - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY}
+  #     - ANTHROPIC_MODEL=${ANTHROPIC_MODEL:-claude-3-sonnet-20240229}
+  #     - HUGGINGFACE_MODEL=${HUGGINGFACE_MODEL:-google/flan-t5-base}
+  #     - HUGGINGFACE_API_KEY=${HUGGINGFACE_API_KEY}
+  #     - LOCAL_MODEL_PATH=${LOCAL_MODEL_PATH:-llama2}
+  #     - LOCAL_MODEL_TYPE=${LOCAL_MODEL_TYPE:-llama}
+  #   depends_on:
+  #     - chatterbox-tts
+  #   restart: unless-stopped
+  #   user: "0"
 
-  frontend:
-    profiles: ["frontend", "ui", "fullstack"]
-    build:
-      context: ./chatterbox-tts-api/frontend
-      dockerfile: Dockerfile
-    container_name: chatterbox-tts-frontend
-    ports:
-      - "${FRONTEND_PORT:-4321}:80"
-    depends_on:
-      - chatterbox-tts
-    restart: unless-stopped
+  # frontend:
+  #   profiles: ["frontend", "ui", "fullstack"]
+  #   build:
+  #     context: ./chatterbox-tts-api/frontend
+  #     dockerfile: Dockerfile
+  #   container_name: chatterbox-tts-frontend
+  #   ports:
+  #     - "${FRONTEND_PORT:-4321}:80"
+  #   depends_on:
+  #     - chatterbox-tts
+  #   restart: unless-stopped
 
   presenton:
     image: ghcr.io/presenton/presenton:latest
@@ -198,6 +212,7 @@ services:
       start_period: 60s
 
 volumes:
+  redis_data:
   chatterbox-models:
   chatterbox-voices:
   chatterbox-models-macos:

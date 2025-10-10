@@ -1,18 +1,21 @@
+import asyncio
 import json
 import logging
-import asyncio
-from typing import Dict, Any, Optional, List, Tuple
 from datetime import datetime
-import redis.asyncio as redis
-from functools import wraps
-from app.core.config import settings
 from enum import IntEnum
+from functools import wraps
+from typing import Any, Dict, List
+
+import redis.asyncio as redis
+
+from app.core.config import settings
 
 logger = logging.getLogger(__name__)
 
 
 class JobPriority(IntEnum):
     """Job priority levels."""
+
     LOW = 1
     NORMAL = 2
     HIGH = 3
@@ -27,6 +30,7 @@ def redis_retry(max_retries: int = 3, base_delay: float = 1.0):
         max_retries: Maximum number of retry attempts
         base_delay: Base delay in seconds for exponential backoff
     """
+
     def decorator(func):
         @wraps(func)
         async def wrapper(*args, **kwargs):
@@ -38,13 +42,17 @@ def redis_retry(max_retries: int = 3, base_delay: float = 1.0):
                 except (redis.ConnectionError, redis.TimeoutError, redis.RedisError) as e:
                     last_exception = e
                     if attempt == max_retries:
-                        logger.error(f"Redis operation {func.__name__} failed after {max_retries} retries",
-                                   extra={"error": str(e), "attempts": attempt + 1})
+                        logger.error(
+                            f"Redis operation {func.__name__} failed after {max_retries} retries",
+                            extra={"error": str(e), "attempts": attempt + 1},
+                        )
                         raise e
 
-                    delay = base_delay * (2 ** attempt)
-                    logger.warning(f"Redis operation {func.__name__} failed, retrying in {delay}s",
-                                 extra={"error": str(e), "attempt": attempt + 1, "delay": delay})
+                    delay = base_delay * (2**attempt)
+                    logger.warning(
+                        f"Redis operation {func.__name__} failed, retrying in {delay}s",
+                        extra={"error": str(e), "attempt": attempt + 1, "delay": delay},
+                    )
                     await asyncio.sleep(delay)
                 except Exception as e:
                     # For non-Redis exceptions, don't retry
@@ -55,7 +63,9 @@ def redis_retry(max_retries: int = 3, base_delay: float = 1.0):
             if last_exception:
                 raise last_exception
             raise Exception("Unexpected error in Redis retry logic")
+
         return wrapper
+
     return decorator
 
 
@@ -65,18 +75,30 @@ class RedisService:
     """
 
     def __init__(self):
-        self.redis_client: Optional[redis.Redis] = None
+        self.redis_client: redis.Redis | None = None
 
-    async def get_client(self) -> redis.Redis:
-        """Get or create Redis client."""
-        if self.redis_client is None:
-            self.redis_client = redis.Redis(
-                host=settings.REDIS_HOST,
-                port=settings.REDIS_PORT,
-                db=settings.REDIS_DB,
-                decode_responses=True  # Decode responses to strings
+    async def get_client(self) -> redis.Redis | None:
+        """Get or create Redis client. Returns None if Redis is not available."""
+        try:
+            if self.redis_client is None:
+                self.redis_client = redis.Redis(
+                    host=settings.REDIS_HOST,
+                    port=settings.REDIS_PORT,
+                    db=settings.REDIS_DB,
+                    decode_responses=True,  # Decode responses to strings
+                    socket_connect_timeout=5,
+                    socket_timeout=5,
+                )
+                # Test connection
+                await self.redis_client.ping()
+            return self.redis_client
+        except Exception as e:
+            logger.warning(
+                "Failed to connect to Redis, continuing without cache",
+                extra={"error": str(e), "error_type": type(e).__name__}
             )
-        return self.redis_client
+            self.redis_client = None
+            return None
 
     async def close(self):
         """Close Redis connection."""
@@ -87,7 +109,7 @@ class RedisService:
     async def health_check(self) -> bool:
         """
         Check if Redis connection is healthy.
-        
+
         Returns:
             True if Redis is accessible, False otherwise
         """
@@ -110,9 +132,9 @@ class RedisService:
         self,
         job_id: str,
         status: str,
-        message: Optional[str] = None,
-        progress: Optional[int] = None,
-        metadata: Optional[Dict[str, Any]] = None
+        message: str | None = None,
+        progress: int | None = None,
+        metadata: Dict[str, Any] | None = None,
     ) -> None:
         """
         Set job status with metadata.
@@ -151,12 +173,12 @@ class RedisService:
             extra={
                 "job_id": job_id,
                 "status": status,
-                "job_message": message  # Renamed to avoid conflict
-            }
+                "job_message": message,  # Renamed to avoid conflict
+            },
         )
 
     @redis_retry(max_retries=2, base_delay=0.5)
-    async def get_job_status(self, job_id: str) -> Optional[Dict[str, Any]]:
+    async def get_job_status(self, job_id: str) -> Dict[str, Any] | None:
         """
         Get job status and metadata.
 
@@ -183,7 +205,9 @@ class RedisService:
         return job_data
 
     @redis_retry(max_retries=2, base_delay=0.5)
-    async def update_job_progress(self, job_id: str, progress: int, message: Optional[str] = None) -> None:
+    async def update_job_progress(
+        self, job_id: str, progress: int, message: str | None = None
+    ) -> None:
         """
         Update job progress percentage.
 
@@ -194,10 +218,7 @@ class RedisService:
         """
         client = await self.get_client()
 
-        updates = {
-            "progress": str(progress),
-            "updated_at": datetime.utcnow().isoformat()
-        }
+        updates = {"progress": str(progress), "updated_at": datetime.utcnow().isoformat()}
 
         if message:
             updates["message"] = message
@@ -206,11 +227,10 @@ class RedisService:
             pipe.hset(f"job:{job_id}", mapping=updates)
             await pipe.execute()
 
-        logger.debug("Job progress updated", extra={
-            "job_id": job_id,
-            "progress": progress,
-            "message": message
-        })
+        logger.debug(
+            "Job progress updated",
+            extra={"job_id": job_id, "progress": progress, "message": message},
+        )
 
     @redis_retry(max_retries=2, base_delay=0.5)
     async def set_job_result(self, job_id: str, result_data: Dict[str, Any]) -> None:
@@ -231,7 +251,7 @@ class RedisService:
 
         logger.info("Job result stored", extra={"job_id": job_id})
 
-    async def get_job_result(self, job_id: str) -> Optional[Dict[str, Any]]:
+    async def get_job_result(self, job_id: str) -> Dict[str, Any] | None:
         """
         Get job result data.
 
@@ -321,18 +341,15 @@ class RedisService:
             # Only allow cancellation for certain statuses
             cancellable_statuses = ["pending", "processing"]
             if current_status not in cancellable_statuses:
-                logger.warning("Cannot cancel job in status", extra={
-                    "job_id": job_id,
-                    "status": current_status
-                })
+                logger.warning(
+                    "Cannot cancel job in status",
+                    extra={"job_id": job_id, "status": current_status},
+                )
                 return False
 
             # Set job status to cancelled
             await self.set_job_status(
-                job_id=job_id,
-                status="cancelled",
-                message=f"Job cancelled: {reason}",
-                progress=0
+                job_id=job_id, status="cancelled", message=f"Job cancelled: {reason}", progress=0
             )
 
             # Set cancellation timestamp
@@ -341,19 +358,15 @@ class RedisService:
                 pipe.hset(f"job:{job_id}", "cancellation_reason", reason)
                 await pipe.execute()
 
-            logger.info("Job cancelled successfully", extra={
-                "job_id": job_id,
-                "reason": reason,
-                "previous_status": current_status
-            })
+            logger.info(
+                "Job cancelled successfully",
+                extra={"job_id": job_id, "reason": reason, "previous_status": current_status},
+            )
 
             return True
 
         except Exception as e:
-            logger.error("Failed to cancel job", extra={
-                "job_id": job_id,
-                "error": str(e)
-            })
+            logger.error("Failed to cancel job", extra={"job_id": job_id, "error": str(e)})
             return False
 
     async def is_job_cancelled(self, job_id: str) -> bool:
@@ -372,13 +385,12 @@ class RedisService:
             status = await client.hget(f"job:{job_id}", "status")
             return status == "cancelled"
         except Exception as e:
-            logger.error("Failed to check job cancellation status", extra={
-                "job_id": job_id,
-                "error": str(e)
-            })
+            logger.error(
+                "Failed to check job cancellation status", extra={"job_id": job_id, "error": str(e)}
+            )
             return False
 
-    async def get_job_cancellation_reason(self, job_id: str) -> Optional[str]:
+    async def get_job_cancellation_reason(self, job_id: str) -> str | None:
         """
         Get the reason for job cancellation.
 
@@ -391,13 +403,11 @@ class RedisService:
         client = await self.get_client()
 
         try:
-            reason = await client.hget(f"job:{job_id}", "cancellation_reason")
-            return reason
+            return await client.hget(f"job:{job_id}", "cancellation_reason")
         except Exception as e:
-            logger.error("Failed to get job cancellation reason", extra={
-                "job_id": job_id,
-                "error": str(e)
-            })
+            logger.error(
+                "Failed to get job cancellation reason", extra={"job_id": job_id, "error": str(e)}
+            )
             return None
 
     async def get_active_jobs(self, limit: int = 50) -> List[Dict[str, Any]]:
@@ -426,13 +436,15 @@ class RedisService:
                 # Only include non-terminal statuses
                 if status not in ["completed", "completed_with_errors", "failed", "cancelled"]:
                     job_id = key[4:]  # Remove "job:" prefix
-                    active_jobs.append({
-                        "job_id": job_id,
-                        "status": status,
-                        "message": job_data.get(b"message", b"").decode(),
-                        "progress": job_data.get(b"progress", b"").decode(),
-                        "updated_at": job_data.get(b"updated_at", b"").decode()
-                    })
+                    active_jobs.append(
+                        {
+                            "job_id": job_id,
+                            "status": status,
+                            "message": job_data.get(b"message", b"").decode(),
+                            "progress": job_data.get(b"progress", b"").decode(),
+                            "updated_at": job_data.get(b"updated_at", b"").decode(),
+                        }
+                    )
 
             return active_jobs
 
@@ -442,7 +454,9 @@ class RedisService:
 
     # Priority Queue Operations
     @redis_retry(max_retries=2, base_delay=0.5)
-    async def add_job_to_priority_queue(self, job_id: str, priority: JobPriority = JobPriority.NORMAL) -> bool:
+    async def add_job_to_priority_queue(
+        self, job_id: str, priority: JobPriority = JobPriority.NORMAL
+    ) -> bool:
         """
         Add a job to the priority queue.
 
@@ -466,24 +480,26 @@ class RedisService:
                 pipe.hset(f"job:{job_id}", "queued_at", datetime.utcnow().isoformat())
                 await pipe.execute()
 
-            logger.info("Job added to priority queue", extra={
-                "job_id": job_id,
-                "priority": priority.name,
-                "priority_score": priority_score
-            })
+            logger.info(
+                "Job added to priority queue",
+                extra={
+                    "job_id": job_id,
+                    "priority": priority.name,
+                    "priority_score": priority_score,
+                },
+            )
 
             return True
 
         except Exception as e:
-            logger.error("Failed to add job to priority queue", extra={
-                "job_id": job_id,
-                "priority": priority.name,
-                "error": str(e)
-            })
+            logger.error(
+                "Failed to add job to priority queue",
+                extra={"job_id": job_id, "priority": priority.name, "error": str(e)},
+            )
             return False
 
     @redis_retry(max_retries=2, base_delay=0.5)
-    async def get_next_priority_job(self) -> Optional[str]:
+    async def get_next_priority_job(self) -> str | None:
         """
         Get the next job from priority queue (highest priority first).
 
@@ -536,20 +552,22 @@ class RedisService:
                 pipe.hset(f"job:{job_id}", "priority", new_priority.name)
                 await pipe.execute()
 
-            logger.info("Job priority updated", extra={
-                "job_id": job_id,
-                "old_priority": JobPriority(int(current_score) * -1).name,
-                "new_priority": new_priority.name
-            })
+            logger.info(
+                "Job priority updated",
+                extra={
+                    "job_id": job_id,
+                    "old_priority": JobPriority(int(current_score) * -1).name,
+                    "new_priority": new_priority.name,
+                },
+            )
 
             return True
 
         except Exception as e:
-            logger.error("Failed to update job priority", extra={
-                "job_id": job_id,
-                "new_priority": new_priority.name,
-                "error": str(e)
-            })
+            logger.error(
+                "Failed to update job priority",
+                extra={"job_id": job_id, "new_priority": new_priority.name, "error": str(e)},
+            )
             return False
 
     @redis_retry(max_retries=2, base_delay=0.5)
@@ -563,8 +581,7 @@ class RedisService:
         client = await self.get_client()
 
         try:
-            length = await client.zcard("job_priority_queue")
-            return length
+            return await client.zcard("job_priority_queue")
         except Exception as e:
             logger.error("Failed to get queue length", extra={"error": str(e)})
             return 0
@@ -586,7 +603,9 @@ class RedisService:
             # Get priority distribution
             priority_counts = {}
             for priority in JobPriority:
-                count = await client.zcount("job_priority_queue", priority.value * -1, priority.value * -1)
+                count = await client.zcount(
+                    "job_priority_queue", priority.value * -1, priority.value * -1
+                )
                 priority_counts[priority.name] = count
 
             # Get oldest and newest jobs in queue
@@ -596,8 +615,12 @@ class RedisService:
             return {
                 "queue_length": queue_length,
                 "priority_distribution": priority_counts,
-                "oldest_jobs": [{"job_id": job[0], "priority_score": job[1]} for job in oldest_jobs],
-                "newest_jobs": [{"job_id": job[0], "priority_score": job[1]} for job in newest_jobs]
+                "oldest_jobs": [
+                    {"job_id": job[0], "priority_score": job[1]} for job in oldest_jobs
+                ],
+                "newest_jobs": [
+                    {"job_id": job[0], "priority_score": job[1]} for job in newest_jobs
+                ],
             }
 
         except Exception as e:
@@ -631,7 +654,9 @@ class RedisService:
                     # Get job update time
                     updated_at_str = await client.hget(key, "updated_at")
                     if updated_at_str:
-                        updated_at = datetime.fromisoformat(updated_at_str.replace('Z', '+00:00')).timestamp()
+                        updated_at = datetime.fromisoformat(
+                            updated_at_str.replace("Z", "+00:00")
+                        ).timestamp()
 
                         if updated_at < cutoff_time:
                             # Delete expired job
@@ -657,7 +682,7 @@ redis_service = RedisService()
 async def check_redis_health() -> bool:
     """
     Global function to check Redis health for use in application health checks.
-    
+
     Returns:
         True if Redis is healthy, False otherwise
     """

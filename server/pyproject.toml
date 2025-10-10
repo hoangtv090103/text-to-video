@@ -1,0 +1,170 @@
+[project]
+name = "text-to-video-service"
+version = "0.1.0"
+description = "Text-to-Video explainer service with LLM script generation, TTS narration, and visual composition"
+authors = [{name = "Text-to-Video Team"}]
+requires-python = ">=3.11"
+
+[tool.ruff]
+# Exclude common directories
+exclude = [
+    ".bzr",
+    ".direnv",
+    ".eggs",
+    ".git",
+    ".git-rewrite",
+    ".hg",
+    ".mypy_cache",
+    ".nox",
+    ".pants.d",
+    ".pytype",
+    ".ruff_cache",
+    ".svn",
+    ".tox",
+    ".venv",
+    "__pypackages__",
+    "_build",
+    "buck-out",
+    "build",
+    "dist",
+    "node_modules",
+    "venv",
+]
+
+# Maximum line length to match Black's default
+line-length = 100
+indent-width = 4
+
+# Target Python 3.11+
+target-version = "py311"
+
+[tool.ruff.lint]
+# Enable pycodestyle (`E`, `W`), Pyflakes (`F`), flake8-bugbear (`B`),
+# flake8-simplify (`SIM`), isort (`I`), and pydocstyle (`D`)
+select = [
+    "E",     # pycodestyle errors
+    "W",     # pycodestyle warnings
+    "F",     # Pyflakes
+    "B",     # flake8-bugbear
+    "SIM",   # flake8-simplify
+    "I",     # isort
+    "UP",    # pyupgrade
+    "C4",    # flake8-comprehensions
+    "RET",   # flake8-return
+    "ARG",   # flake8-unused-arguments
+]
+
+# Ignore specific rules
+ignore = [
+    "E501",   # Line too long (handled by formatter)
+    "B008",   # Do not perform function call in argument defaults (FastAPI uses this pattern)
+    "UP006",  # Use `type` instead of `Type` for type annotations (Pydantic compatibility)
+    "UP007",  # Use `X | Y` for type annotations (Pydantic compatibility)
+]
+
+# Allow autofix for all enabled rules (when `--fix`) is provided.
+fixable = ["ALL"]
+unfixable = []
+
+# Allow unused variables when prefixed with underscore
+dummy-variable-rgx = "^(_+|(_+[a-zA-Z0-9_]*[a-zA-Z0-9]+?))$"
+
+[tool.ruff.format]
+# Use double quotes for strings
+quote-style = "double"
+
+# Indent with spaces
+indent-style = "space"
+
+# Respect magic trailing commas
+skip-magic-trailing-comma = false
+
+# Automatically detect line endings
+line-ending = "auto"
+
+[tool.black]
+line-length = 100
+target-version = ['py311']
+include = '\.pyi?$'
+extend-exclude = '''
+/(
+  # directories
+  \.eggs
+  | \.git
+  | \.hg
+  | \.mypy_cache
+  | \.tox
+  | \.venv
+  | _build
+  | buck-out
+  | build
+  | dist
+)/
+'''
+
+[tool.mypy]
+python_version = "3.11"
+warn_return_any = true
+warn_unused_configs = true
+disallow_untyped_defs = true
+disallow_incomplete_defs = true
+check_untyped_defs = true
+disallow_untyped_decorators = true
+no_implicit_optional = true
+warn_redundant_casts = true
+warn_unused_ignores = true
+warn_no_return = true
+warn_unreachable = true
+strict_equality = true
+strict_concatenate = true
+
+# Exclude test files from strict type checking
+[[tool.mypy.overrides]]
+module = "tests.*"
+disallow_untyped_defs = false
+disallow_incomplete_defs = false
+disallow_untyped_decorators = false
+
+# Third-party libraries without type stubs
+[[tool.mypy.overrides]]
+module = [
+    "moviepy.*",
+    "PIL.*",
+    "pypdf.*",
+    "matplotlib.*",
+    "pygments.*",
+]
+ignore_missing_imports = true
+
+[tool.pytest.ini_options]
+minversion = "7.0"
+testpaths = ["tests"]
+python_files = ["test_*.py"]
+python_classes = ["Test*"]
+python_functions = ["test_*"]
+asyncio_mode = "auto"
+
+# Markers for test organization
+markers = [
+    "unit: Unit tests for individual components",
+    "integration: Integration tests for service interactions",
+    "e2e: End-to-end tests for complete workflows",
+    "contract: Contract tests validating API specifications",
+    "slow: Tests that take significant time to run",
+]
+
+# Coverage options
+addopts = [
+    "-ra",
+    "--strict-markers",
+    "--strict-config",
+    "--cov=app",
+    "--cov-report=term-missing:skip-covered",
+    "--cov-report=html",
+    "--cov-report=xml",
+]
+
+filterwarnings = [
+    "ignore::DeprecationWarning",
+    "ignore::PendingDeprecationWarning",
+]

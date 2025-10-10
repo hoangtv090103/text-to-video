@@ -1,12 +1,12 @@
+# Core FastAPI dependencies
 fastapi
-uvicorn
+uvicorn[standard]
 redis
 pydantic
 pydantic-settings
 python-json-logger
 httpx
 pydub
-peft
 openai>=1.3.0
 matplotlib
 pillow
@@ -18,9 +18,38 @@ python-multipart
 moviepy
 imageio-ffmpeg
 Pygments
-graphviz
-texlive-latex-base
-texlive-latex-extra
-texlive-fonts-recommended
 mermaid-py
 cairosvg
+
+# LangChain ecosystem for configurable LLM providers
+langchain>=0.1.0
+langchain-core>=0.1.0
+langchain-community>=0.0.10
+langchain-openai>=0.0.5
+langchain-google-genai>=0.0.5
+langchain-anthropic>=0.0.5
+langchain-ollama>=0.0.5
+
+# Basic dependencies for local models (optional heavy dependencies below)
+ctransformers>=0.2.27
+huggingface-hub>=0.15.0
+
+# Optional: Heavy ML dependencies - install separately if needed
+# Uncomment the following lines if you need local HuggingFace models
+# langchain-huggingface>=0.0.5
+# transformers>=4.30.0
+# torch>=2.0.0
+
+# Testing and Development dependencies
+pytest>=7.4.0
+pytest-asyncio>=0.21.0
+pytest-mock>=3.12.0
+pytest-cov>=4.1.0
+structlog>=23.2.0
+pypdf>=3.17.0
+pdfplumber>=0.10.0
+python-dotenv>=1.0.0
+mypy>=1.7.0
+ruff>=0.1.0
+
+moviepy

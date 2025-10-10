@@ -1,10 +1,11 @@
-import requests
-import os
 import logging
+import os
+import time
 from typing import Dict
 from uuid import uuid4
+
+import requests
 from pydub import AudioSegment
-import time
 
 from app.core.config import settings
 
@@ -23,6 +24,7 @@ def exponential_backoff_retry_sync(max_retries=3, base_delay=1.0):
         max_retries: Maximum number of retry attempts
         base_delay: Base delay in seconds
     """
+
     def decorator(func):
         def wrapper(*args, **kwargs):
             last_exception = Exception("Unknown error")
@@ -34,17 +36,23 @@ def exponential_backoff_retry_sync(max_retries=3, base_delay=1.0):
                     last_exception = e
 
                     if attempt == max_retries:
-                        logger.error(f"Function {func.__name__} failed after {max_retries} retries",
-                                   extra={"error": str(e), "attempt": attempt + 1})
+                        logger.error(
+                            f"Function {func.__name__} failed after {max_retries} retries",
+                            extra={"error": str(e), "attempt": attempt + 1},
+                        )
                         raise e
 
-                    delay = base_delay * (2 ** attempt)
-                    logger.warning(f"Function {func.__name__} failed, retrying in {delay}s",
-                                 extra={"error": str(e), "attempt": attempt + 1, "delay": delay})
+                    delay = base_delay * (2**attempt)
+                    logger.warning(
+                        f"Function {func.__name__} failed, retrying in {delay}s",
+                        extra={"error": str(e), "attempt": attempt + 1, "delay": delay},
+                    )
                     time.sleep(delay)
 
             raise last_exception
+
         return wrapper
+
     return decorator
 
 
@@ -71,7 +79,7 @@ def generate_audio_sync(scene: Dict) -> Dict:
             "status": "success_no_text",
             "message": "No narration text provided",
             "path": None,
-            "duration": 0
+            "duration": 0,
         }
 
     payload = {
@@ -80,8 +88,8 @@ def generate_audio_sync(scene: Dict) -> Dict:
         "response_format": "wav",
         "speed": 1,
         "exaggeration": 0.25,  # Lower values = faster generation
-        "cfg_weight": 0.5,     # Lower values = faster generation
-        "temperature": 0.3,    # Higher values = faster generation
+        "cfg_weight": 0.5,  # Lower values = faster generation
+        "temperature": 0.3,  # Higher values = faster generation
     }
 
     # Use requests instead of httpx for synchronous calls
@@ -98,24 +106,19 @@ def generate_audio_sync(scene: Dict) -> Dict:
     with open(file_path, "wb") as f:
         f.write(response.content)
 
-    logger.info("Successfully saved TTS audio", extra={
-        "segment_id": seg_id,
-        "file_path": file_path,
-        "file_size": len(response.content)
-    })
+    logger.info(
+        "Successfully saved TTS audio",
+        extra={"segment_id": seg_id, "file_path": file_path, "file_size": len(response.content)},
+    )
 
     # Get the duration of the audio file
     duration = get_audio_duration_sync(file_path)
-    logger.info("Successfully retrieved duration of TTS audio", extra={
-        "segment_id": seg_id,
-        "duration": duration
-    })
+    logger.info(
+        "Successfully retrieved duration of TTS audio",
+        extra={"segment_id": seg_id, "duration": duration},
+    )
 
-    return {
-        "path": file_path,
-        "duration": duration,
-        "status": "success"
-    }
+    return {"path": file_path, "duration": duration, "status": "success"}
 
 
 def get_audio_duration_sync(file_path: str) -> float:
@@ -130,11 +133,9 @@ def get_audio_duration_sync(file_path: str) -> float:
     """
     try:
         audio = AudioSegment.from_file(file_path)
-        duration = audio.duration_seconds
-        return duration
+        return audio.duration_seconds
     except Exception as e:
-        logger.error("Failed to get duration of audio file", extra={
-            "file_path": file_path,
-            "error": str(e)
-        })
+        logger.error(
+            "Failed to get duration of audio file", extra={"file_path": file_path, "error": str(e)}
+        )
         return 0.0

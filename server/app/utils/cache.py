@@ -5,8 +5,7 @@ Uses Redis for storage with configurable TTL.
 import hashlib
 import json
 import logging
-from typing import Optional, Any
-from app.core.config import settings
+from typing import Any
 
 logger = logging.getLogger(__name__)
 
@@ -22,46 +21,65 @@ def generate_cache_key(prefix: str, content: str) -> str:
     content_hash = hashlib.sha256(content.encode()).hexdigest()[:16]
     return f"cache:{prefix}:{content_hash}"
 
-async def get_from_cache(prefix: str, content: str) -> Optional[Any]:
+async def get_from_cache(prefix: str, content: str) -> Any | None:
     """Get cached result if available."""
     try:
-        from app.services.redis_service import redis_service, REDIS_AVAILABLE
-        
-        if not REDIS_AVAILABLE or not redis_service:
+        from app.services.redis_service import redis_service
+
+        if not redis_service:
+            logger.debug(f"Redis not available, skipping cache lookup for {prefix}")
             return None
-            
+
         cache_key = generate_cache_key(prefix, content)
         client = await redis_service.get_client()
+
+        if client is None:
+            logger.debug(f"Redis client not available, skipping cache lookup for {prefix}")
+            return None
+
         cached_data = await client.get(cache_key)
-        
+
         if cached_data:
             logger.info(f"Cache hit for {prefix}", extra={"cache_key": cache_key})
             return json.loads(cached_data)
-            
+
+        logger.debug(f"Cache miss for {prefix}", extra={"cache_key": cache_key})
+
     except Exception as e:
-        logger.warning(f"Cache get failed for {prefix}", extra={"error": str(e)})
-    
+        logger.warning(
+            f"Cache get failed for {prefix}, continuing without cache",
+            extra={"error": str(e), "error_type": type(e).__name__}
+        )
+
     return None
 
 async def set_cache(prefix: str, content: str, result: Any) -> None:
     """Cache the result with appropriate TTL."""
     try:
-        from app.services.redis_service import redis_service, REDIS_AVAILABLE
-        
-        if not REDIS_AVAILABLE or not redis_service:
+        from app.services.redis_service import redis_service
+
+        if not redis_service:
+            logger.debug(f"Redis not available, skipping cache set for {prefix}")
             return
-            
+
         cache_key = generate_cache_key(prefix, content)
         client = await redis_service.get_client()
-        
+
+        if client is None:
+            logger.debug(f"Redis client not available, skipping cache set for {prefix}")
+            return
+
         # Store with TTL
         ttl = CACHE_TTL.get(prefix, 1800)  # Default 30 minutes
         await client.setex(cache_key, ttl, json.dumps(result))
-        
+
         logger.info(f"Cached {prefix} result", extra={
-            "cache_key": cache_key, 
+            "cache_key": cache_key,
             "ttl": ttl
         })
-        
+
     except Exception as e:
-        logger.warning(f"Cache set failed for {prefix}", extra={"error": str(e)})
+        logger.warning(
+            f"Cache set failed for {prefix}, continuing without caching",
+            extra={"error": str(e), "error_type": type(e).__name__}
+        )
