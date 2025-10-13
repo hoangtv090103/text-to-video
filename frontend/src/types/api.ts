@@ -98,6 +98,33 @@ export interface ApiError {
   status_code?: number
 }
 
+// LLM Admin Types
+export interface LLMConfig {
+  provider: string
+  base_url?: string
+  has_api_key: boolean
+  model?: string
+}
+
+export interface ModelInfo {
+  id: string
+  name: string
+  description?: string
+}
+
+export interface FetchModelsResponse {
+  success: boolean
+  models: ModelInfo[]
+  error?: string
+}
+
+export interface TestModelResponse {
+  success: boolean
+  message: string
+  response?: string
+  latency_ms?: number
+}
+
 // Admin LLM Configuration Types
 export interface LLMProviderInfo {
   provider: string

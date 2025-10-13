@@ -1,183 +1,480 @@
 'use client'
 
-import { useState } from 'react'
-import { RefreshCw, Clock, CheckCircle, XCircle, AlertCircle, Square, Loader2 } from 'lucide-react'
+import { useState, useEffect } from 'react'
+import { Clock, CheckCircle, XCircle, AlertCircle, AlertTriangle, Loader2, Eye, Download, X } from 'lucide-react'
 import { useJobs } from '@/hooks/useJobs'
 import { JobData } from '@/types/api'
+import { VideoPlayer } from './VideoPlayer'
 
-interface JobsListProps {
-    showActiveOnly?: boolean
-    onJobSelect?: (jobId: string) => void
+interface JobDetailModalProps {
+    job: JobData
+    onClose: () => void
 }
 
-export const JobsList = ({ showActiveOnly = false, onJobSelect }: JobsListProps) => {
-    const { jobs, activeJobs, isLoading, error, refetchJobs } = useJobs()
-    const [selectedJob, setSelectedJob] = useState<string | null>(null)
+const JobDetailModal = ({ job, onClose }: JobDetailModalProps) => {
+    // Check multiple possible locations for video data
+    const videoData = job.result?.video
+    const hasVideo = videoData && (videoData.video_url || videoData.video_path)
+    const videoUrl = videoData?.video_url || videoData?.download_url
+    const apiUrl = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000'
 
-    const displayJobs = showActiveOnly ? activeJobs : jobs
+    // Debug logging (remove in production)
+    console.log('Job data:', {
+        status: job.status,
+        hasResult: !!job.result,
+        hasVideo: !!videoData,
+        videoUrl: videoUrl,
+        videoData: videoData,
+        fullJob: job
+    })
+
+    return (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black bg-opacity-50" onClick={onClose}>
+            <div className="bg-white rounded-xl shadow-2xl max-w-4xl w-full max-h-[90vh] overflow-y-auto" onClick={(e) => e.stopPropagation()}>
+                {/* Header */}
+                <div className="sticky top-0 bg-white border-b border-gray-200 px-6 py-4 flex items-center justify-between z-10">
+                    <div>
+                        <h2 className="text-2xl font-bold text-gray-900">Job Details</h2>
+                        <p className="text-sm text-gray-600">ID: {job.job_id}</p>
+                    </div>
+                    <button
+                        onClick={onClose}
+                        className="p-2 hover:bg-gray-100 rounded-lg transition-colors"
+                    >
+                        <X className="h-6 w-6 text-gray-600" />
+                    </button>
+                </div>
+
+                {/* Content */}
+                <div className="p-6 space-y-6">
+                    {/* Debug Info (temporary) */}
+                    {job.status === 'completed' && !hasVideo && (
+                        <div className="bg-blue-50 border border-blue-200 rounded-lg p-4 text-xs">
+                            <p className="font-medium text-blue-900 mb-2">Debug Info:</p>
+                            <pre className="text-blue-800 overflow-x-auto">
+                                {JSON.stringify({
+                                    hasResult: !!job.result,
+                                    resultKeys: job.result ? Object.keys(job.result) : [],
+                                    videoData: videoData,
+                                }, null, 2)}
+                            </pre>
+                        </div>
+                    )}
+
+                    {/* Video Player or No Video Message */}
+                    {hasVideo ? (
+                        <div className="bg-gradient-to-br from-gray-50 to-gray-100 rounded-xl p-6 border border-gray-200">
+                            <div className="flex items-center justify-between mb-4">
+                                <h3 className="text-lg font-semibold text-gray-900">Generated Video</h3>
+                                <a
+                                    href={`${apiUrl}${videoData.download_url || videoUrl}?download=true`}
+                                    download
+                                    className="inline-flex items-center space-x-2 px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors text-sm font-medium"
+                                >
+                                    <Download className="h-4 w-4" />
+                                    <span>Download</span>
+                                </a>
+                            </div>
+
+                            {/* Video Player */}
+                            <div className="relative rounded-lg overflow-hidden bg-black">
+                                <video
+                                    controls
+                                    className="w-full max-h-[500px] mx-auto"
+                                    poster=""
+                                    preload="metadata"
+                                >
+                                    <source src={`${apiUrl}${videoUrl}`} type="video/mp4" />
+                                    Your browser does not support the video tag.
+                                </video>
+                            </div>
+
+                            {/* Video Info */}
+                            <div className="mt-4 flex items-center justify-center space-x-6 text-sm text-gray-600">
+                                {videoData.duration && (
+                                    <div className="flex items-center space-x-1">
+                                        <Clock className="h-4 w-4" />
+                                        <span>{videoData.duration.toFixed(1)}s</span>
+                                    </div>
+                                )}
+                                {videoData.duration_seconds && !videoData.duration && (
+                                    <div className="flex items-center space-x-1">
+                                        <Clock className="h-4 w-4" />
+                                        <span>{videoData.duration_seconds.toFixed(1)}s</span>
+                                    </div>
+                                )}
+                                {videoData.file_size_mb && (
+                                    <div className="flex items-center space-x-1">
+                                        <Download className="h-4 w-4" />
+                                        <span>{videoData.file_size_mb.toFixed(2)} MB</span>
+                                    </div>
+                                )}
+                                <div className="flex items-center space-x-1">
+                                    <CheckCircle className="h-4 w-4 text-green-600" />
+                                    <span className="capitalize text-green-600">{videoData.status || 'ready'}</span>
+                                </div>
+                            </div>
+                        </div>
+                    ) : (
+                        <div className={`border rounded-lg p-6 text-center ${videoData?.status === 'error' || job.status === 'failed'
+                                ? 'bg-red-50 border-red-200'
+                                : 'bg-yellow-50 border-yellow-200'
+                            }`}>
+                            {videoData?.status === 'error' || job.status === 'failed' ? (
+                                <XCircle className="h-12 w-12 text-red-600 mx-auto mb-3" />
+                            ) : (
+                                <AlertTriangle className="h-12 w-12 text-yellow-600 mx-auto mb-3" />
+                            )}
+
+                            <h3 className={`text-lg font-semibold mb-2 ${videoData?.status === 'error' || job.status === 'failed'
+                                    ? 'text-red-900'
+                                    : 'text-yellow-900'
+                                }`}>
+                                {videoData?.status === 'error' || job.status === 'failed'
+                                    ? 'Video Generation Error'
+                                    : 'No Video Available'}
+                            </h3>
+
+                            <p className={`text-sm ${videoData?.status === 'error' || job.status === 'failed'
+                                    ? 'text-red-700'
+                                    : 'text-yellow-700'
+                                }`}>
+                                {videoData?.error
+                                    ? videoData.error
+                                    : job.status === 'processing' || job.status === 'pending'
+                                        ? 'Video is still being generated. Please wait...'
+                                        : job.status === 'failed'
+                                            ? 'Video generation failed. Please try again.'
+                                            : 'Video not available for this job.'}
+                            </p>
+
+                            {/* Show additional error details if available */}
+                            {job.result?.errors && job.result.errors.length > 0 && (
+                                <div className="mt-4 text-left bg-white rounded-lg p-3 border border-red-300">
+                                    <p className="text-xs font-medium text-red-900 mb-2">Error Details:</p>
+                                    <ul className="text-xs text-red-700 space-y-1 list-disc list-inside">
+                                        {job.result.errors.map((error: any, idx: number) => (
+                                            <li key={idx}>{typeof error === 'string' ? error : JSON.stringify(error)}</li>
+                                        ))}
+                                    </ul>
+                                </div>
+                            )}
+                        </div>
+                    )}
+
+                    {/* Job Information */}
+                    <div className="bg-gray-50 rounded-lg p-4">
+                        <h3 className="text-lg font-semibold text-gray-900 mb-4">Information</h3>
+                        <div className="grid grid-cols-2 gap-4">
+                            <div>
+                                <p className="text-sm text-gray-600">Status</p>
+                                <p className="text-base font-medium text-gray-900 capitalize">
+                                    {job.status.replace('_', ' ')}
+                                </p>
+                            </div>
+                            <div>
+                                <p className="text-sm text-gray-600">Progress</p>
+                                <p className="text-base font-medium text-gray-900">
+                                    {job.progress !== undefined ? `${job.progress}%` : 'N/A'}
+                                </p>
+                            </div>
+                            {job.updated_at && (
+                                <div>
+                                    <p className="text-sm text-gray-600">Last Updated</p>
+                                    <p className="text-base font-medium text-gray-900">
+                                        {new Date(job.updated_at).toLocaleString()}
+                                    </p>
+                                </div>
+                            )}
+                            {job.completed_at && (
+                                <div>
+                                    <p className="text-sm text-gray-600">Completed At</p>
+                                    <p className="text-base font-medium text-gray-900">
+                                        {new Date(job.completed_at).toLocaleString()}
+                                    </p>
+                                </div>
+                            )}
+                        </div>
+                        {job.message && (
+                            <div className="mt-4">
+                                <p className="text-sm text-gray-600">Message</p>
+                                <p className="text-base text-gray-900">{job.message}</p>
+                            </div>
+                        )}
+                    </div>
+
+                    {/* Result Details */}
+                    {job.result && (
+                        <div className="bg-gray-50 rounded-lg p-4">
+                            <h3 className="text-lg font-semibold text-gray-900 mb-4">Processing Results</h3>
+                            <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+                                {job.result.successful_tasks !== undefined && (
+                                    <div>
+                                        <p className="text-sm text-gray-600">Successful Tasks</p>
+                                        <p className="text-2xl font-bold text-green-600">
+                                            {job.result.successful_tasks}
+                                        </p>
+                                    </div>
+                                )}
+                                {job.result.failed_tasks !== undefined && (
+                                    <div>
+                                        <p className="text-sm text-gray-600">Failed Tasks</p>
+                                        <p className="text-2xl font-bold text-red-600">
+                                            {job.result.failed_tasks}
+                                        </p>
+                                    </div>
+                                )}
+                                {job.result.script_scenes && (
+                                    <div>
+                                        <p className="text-sm text-gray-600">Scenes</p>
+                                        <p className="text-2xl font-bold text-blue-600">
+                                            {Array.isArray(job.result.script_scenes)
+                                                ? job.result.script_scenes.length
+                                                : job.result.script_scenes}
+                                        </p>
+                                    </div>
+                                )}
+                                {job.result.video?.duration && (
+                                    <div>
+                                        <p className="text-sm text-gray-600">Duration</p>
+                                        <p className="text-2xl font-bold text-purple-600">
+                                            {job.result.video.duration.toFixed(1)}s
+                                        </p>
+                                    </div>
+                                )}
+                            </div>
+                        </div>
+                    )}
+
+                    {/* Action Buttons */}
+                    <div className="flex justify-center gap-3 pt-4 border-t border-gray-200">
+                        {hasVideo && (
+                            <>
+                                <a
+                                    href={`${apiUrl}${videoUrl}?download=false`}
+                                    target="_blank"
+                                    rel="noopener noreferrer"
+                                    className="inline-flex items-center space-x-2 px-6 py-3 bg-gradient-to-r from-indigo-600 to-purple-600 text-white rounded-lg hover:from-indigo-700 hover:to-purple-700 transition-all font-medium shadow-lg"
+                                >
+                                    <Eye className="h-5 w-5" />
+                                    <span>Open in New Tab</span>
+                                </a>
+                                <a
+                                    href={`${apiUrl}${videoData.download_url || videoUrl}?download=true`}
+                                    download
+                                    className="inline-flex items-center space-x-2 px-6 py-3 bg-gradient-to-r from-blue-600 to-indigo-600 text-white rounded-lg hover:from-blue-700 hover:to-indigo-700 transition-all font-medium shadow-lg"
+                                >
+                                    <Download className="h-5 w-5" />
+                                    <span>Download Video</span>
+                                </a>
+                            </>
+                        )}
+                        <button
+                            onClick={onClose}
+                            className="inline-flex items-center space-x-2 px-6 py-3 bg-gray-100 text-gray-700 rounded-lg hover:bg-gray-200 transition-colors font-medium"
+                        >
+                            <X className="h-5 w-5" />
+                            <span>Close</span>
+                        </button>
+                    </div>
+                </div>
+            </div>
+        </div>
+    )
+}
+
+export const JobsList = () => {
+    const { jobs, isLoading, error, refetchJobs } = useJobs()
+    const [selectedJob, setSelectedJob] = useState<JobData | null>(null)
+    const [filterStatus, setFilterStatus] = useState<'all' | 'active' | 'completed'>('all')
+
+    useEffect(() => {
+        refetchJobs()
+        const interval = setInterval(refetchJobs, 5000)
+        return () => clearInterval(interval)
+    }, [refetchJobs])
 
     const getStatusIcon = (status: string) => {
         switch (status) {
             case 'pending':
-                return <Clock className="h-4 w-4 text-yellow-500" />
+                return <Clock className="h-5 w-5 text-yellow-500" />
             case 'processing':
-                return <Loader2 className="h-4 w-4 text-blue-500 animate-spin" />
+                return <Loader2 className="h-5 w-5 text-blue-500 animate-spin" />
             case 'completed':
-                return <CheckCircle className="h-4 w-4 text-green-500" />
+                return <CheckCircle className="h-5 w-5 text-green-500" />
             case 'completed_with_errors':
-                return <AlertCircle className="h-4 w-4 text-orange-500" />
+                return <AlertCircle className="h-5 w-5 text-orange-500" />
             case 'failed':
-                return <XCircle className="h-4 w-4 text-red-500" />
-            case 'cancelled':
-                return <Square className="h-4 w-4 text-gray-500" />
+                return <XCircle className="h-5 w-5 text-red-500" />
             default:
-                return <Clock className="h-4 w-4 text-gray-500" />
+                return <Clock className="h-5 w-5 text-gray-500" />
         }
     }
 
-    const getStatusColor = (status: string) => {
+    const getStatusBadge = (status: string) => {
+        const baseClasses = "px-3 py-1 rounded-full text-xs font-medium"
         switch (status) {
             case 'pending':
-                return 'bg-yellow-50 border-yellow-200 hover:bg-yellow-100'
+                return `${baseClasses} bg-yellow-100 text-yellow-800`
             case 'processing':
-                return 'bg-blue-50 border-blue-200 hover:bg-blue-100'
+                return `${baseClasses} bg-blue-100 text-blue-800`
             case 'completed':
-                return 'bg-green-50 border-green-200 hover:bg-green-100'
+                return `${baseClasses} bg-green-100 text-green-800`
             case 'completed_with_errors':
-                return 'bg-orange-50 border-orange-200 hover:bg-orange-100'
+                return `${baseClasses} bg-orange-100 text-orange-800`
             case 'failed':
-                return 'bg-red-50 border-red-200 hover:bg-red-100'
-            case 'cancelled':
-                return 'bg-gray-50 border-gray-200 hover:bg-gray-100'
+                return `${baseClasses} bg-red-100 text-red-800`
             default:
-                return 'bg-gray-50 border-gray-200 hover:bg-gray-100'
+                return `${baseClasses} bg-gray-100 text-gray-800`
         }
     }
 
-    const handleJobClick = (job: JobData) => {
-        setSelectedJob(job.job_id)
-        onJobSelect?.(job.job_id)
-    }
-
-    const formatDate = (dateString?: string) => {
-        if (!dateString) return 'N/A'
-        try {
-            return new Date(dateString).toLocaleString()
-        } catch {
-            return dateString
+    const filteredJobs = jobs.filter(job => {
+        if (filterStatus === 'all') return true
+        if (filterStatus === 'active') {
+            return ['pending', 'processing'].includes(job.status)
         }
+        if (filterStatus === 'completed') {
+            return ['completed', 'completed_with_errors', 'failed', 'cancelled'].includes(job.status)
+        }
+        return true
+    })
+
+    if (isLoading && jobs.length === 0) {
+        return (
+            <div className="flex items-center justify-center py-12">
+                <Loader2 className="h-8 w-8 text-blue-600 animate-spin" />
+            </div>
+        )
     }
 
     if (error) {
         return (
-            <div className="bg-white rounded-lg shadow-md p-6">
-                <div className="flex items-center space-x-2 text-red-600">
-                    <AlertCircle className="h-5 w-5" />
-                    <span>Error loading jobs: {error}</span>
-                </div>
+            <div className="bg-red-50 border border-red-200 rounded-lg p-4 text-center">
+                <AlertCircle className="h-8 w-8 text-red-600 mx-auto mb-2" />
+                <p className="text-red-800">{error}</p>
+                <button
+                    onClick={refetchJobs}
+                    className="mt-4 px-4 py-2 bg-red-600 text-white rounded-lg hover:bg-red-700 transition-colors"
+                >
+                    Retry
+                </button>
             </div>
         )
     }
 
     return (
-        <div className="bg-white rounded-lg shadow-md">
-            <div className="px-6 py-4 border-b border-gray-200">
-                <div className="flex items-center justify-between">
-                    <h2 className="text-lg font-semibold text-gray-900">
-                        {showActiveOnly ? 'Active Jobs' : 'Recent Jobs'}
-                    </h2>
+        <>
+            <div className="space-y-4">
+                {/* Filter Tabs */}
+                <div className="flex space-x-2 bg-gray-100 p-1 rounded-lg w-fit mx-auto">
                     <button
-                        onClick={refetchJobs}
-                        disabled={isLoading}
-                        className="flex items-center space-x-2 px-3 py-1 text-sm bg-blue-600 text-white rounded-md hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed"
+                        onClick={() => setFilterStatus('all')}
+                        className={`px-4 py-2 text-sm font-medium rounded-md transition-colors ${filterStatus === 'all'
+                                ? 'bg-white text-gray-900 shadow-sm'
+                                : 'text-gray-600 hover:text-gray-900'
+                            }`}
                     >
-                        <RefreshCw className={`h-4 w-4 ${isLoading ? 'animate-spin' : ''}`} />
-                        <span>Refresh</span>
+                        All ({jobs.length})
+                    </button>
+                    <button
+                        onClick={() => setFilterStatus('active')}
+                        className={`px-4 py-2 text-sm font-medium rounded-md transition-colors ${filterStatus === 'active'
+                                ? 'bg-white text-gray-900 shadow-sm'
+                                : 'text-gray-600 hover:text-gray-900'
+                            }`}
+                    >
+                        Active ({jobs.filter(j => ['pending', 'processing'].includes(j.status)).length})
+                    </button>
+                    <button
+                        onClick={() => setFilterStatus('completed')}
+                        className={`px-4 py-2 text-sm font-medium rounded-md transition-colors ${filterStatus === 'completed'
+                                ? 'bg-white text-gray-900 shadow-sm'
+                                : 'text-gray-600 hover:text-gray-900'
+                            }`}
+                    >
+                        Completed ({jobs.filter(j => ['completed', 'completed_with_errors'].includes(j.status)).length})
                     </button>
                 </div>
-            </div>
 
-            <div className="divide-y divide-gray-200">
-                {displayJobs.length === 0 ? (
-                    <div className="px-6 py-8 text-center text-gray-500">
-                        {showActiveOnly ? 'No active jobs' : 'No jobs found'}
+                {/* Jobs Grid */}
+                {filteredJobs.length === 0 ? (
+                    <div className="text-center py-12 bg-white rounded-lg shadow-md">
+                        <p className="text-gray-600">No jobs found</p>
                     </div>
                 ) : (
-                    displayJobs.map((job) => (
-                        <div
-                            key={job.job_id}
-                            className={`
-                px-6 py-4 cursor-pointer transition-colors
-                ${getStatusColor(job.status)}
-                ${selectedJob === job.job_id ? 'ring-2 ring-blue-500' : ''}
-              `}
-                            onClick={() => handleJobClick(job)}
-                        >
-                            <div className="flex items-start justify-between">
-                                <div className="flex items-start space-x-3">
+                    <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+                        {filteredJobs.map((job) => (
+                            <div
+                                key={job.job_id}
+                                className="bg-white rounded-lg shadow-md hover:shadow-lg transition-shadow p-6 border border-gray-200 cursor-pointer"
+                                onClick={() => setSelectedJob(job)}
+                            >
+                                <div className="flex items-start justify-between mb-4">
                                     {getStatusIcon(job.status)}
-                                    <div className="flex-1 min-w-0">
-                                        <div className="flex items-center space-x-2">
-                                            <p className="text-sm font-medium text-gray-900 truncate">
-                                                Job {job.job_id.slice(0, 8)}...
-                                            </p>
-                                            <span className="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium capitalize">
-                                                {job.status.replace('_', ' ')}
-                                            </span>
-                                        </div>
-
-                                        {job.message && (
-                                            <p className="text-sm text-gray-600 mt-1 truncate">
-                                                {job.message}
-                                            </p>
-                                        )}
-
-                                        <div className="flex items-center space-x-4 mt-2 text-xs text-gray-500">
-                                            {job.progress !== undefined && (
-                                                <span>Progress: {job.progress}%</span>
-                                            )}
-                                            <span>Updated: {formatDate(job.updated_at)}</span>
-                                        </div>
-                                    </div>
+                                    <span className={getStatusBadge(job.status)}>
+                                        {job.status.replace('_', ' ')}
+                                    </span>
                                 </div>
 
-                                <div className="flex-shrink-0">
-                                    {job.status === 'processing' && (
-                                        <span className="inline-flex items-center px-2 py-1 rounded-full text-xs font-medium bg-blue-100 text-blue-800">
-                                            Running
-                                        </span>
+                                <div className="space-y-2">
+                                    <p className="text-sm font-mono text-gray-600">
+                                        {job.job_id.slice(0, 8)}...
+                                    </p>
+
+                                    {job.progress !== undefined && (
+                                        <div>
+                                            <div className="flex items-center justify-between mb-1">
+                                                <span className="text-xs text-gray-600">Progress</span>
+                                                <span className="text-xs font-medium text-gray-900">
+                                                    {job.progress}%
+                                                </span>
+                                            </div>
+                                            <div className="w-full bg-gray-200 rounded-full h-2">
+                                                <div
+                                                    className="bg-blue-600 h-2 rounded-full transition-all duration-300"
+                                                    style={{ width: `${job.progress}%` }}
+                                                />
+                                            </div>
+                                        </div>
                                     )}
-                                    {job.status === 'completed' && (
-                                        <span className="inline-flex items-center px-2 py-1 rounded-full text-xs font-medium bg-green-100 text-green-800">
-                                            Done
-                                        </span>
+
+                                    {job.message && (
+                                        <p className="text-xs text-gray-600 line-clamp-2">
+                                            {job.message}
+                                        </p>
                                     )}
-                                    {job.status === 'failed' && (
-                                        <span className="inline-flex items-center px-2 py-1 rounded-full text-xs font-medium bg-red-100 text-red-800">
-                                            Failed
-                                        </span>
+
+                                    {job.updated_at && (
+                                        <p className="text-xs text-gray-500">
+                                            Updated: {new Date(job.updated_at).toLocaleString()}
+                                        </p>
                                     )}
                                 </div>
+
+                                <button
+                                    onClick={(e) => {
+                                        e.stopPropagation()
+                                        setSelectedJob(job)
+                                    }}
+                                    className="mt-4 w-full flex items-center justify-center space-x-2 px-4 py-2 bg-gray-100 hover:bg-gray-200 text-gray-700 rounded-lg transition-colors"
+                                >
+                                    <Eye className="h-4 w-4" />
+                                    <span className="text-sm font-medium">View Details</span>
+                                </button>
                             </div>
-                        </div>
-                    ))
+                        ))}
+                    </div>
                 )}
             </div>
 
-            {displayJobs.length > 0 && (
-                <div className="px-6 py-4 border-t border-gray-200 bg-gray-50">
-                    <div className="flex items-center justify-between text-sm text-gray-600">
-                        <span>
-                            Showing {displayJobs.length} job{displayJobs.length !== 1 ? 's' : ''}
-                        </span>
-                        {showActiveOnly && (
-                            <span>
-                                {activeJobs.length} active • {jobs.length - activeJobs.length} completed
-                            </span>
-                        )}
-                    </div>
-                </div>
+            {/* Detail Modal */}
+            {selectedJob && (
+                <JobDetailModal
+                    job={selectedJob}
+                    onClose={() => setSelectedJob(null)}
+                />
             )}
-        </div>
+        </>
     )
 }
