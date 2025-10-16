@@ -14,19 +14,23 @@ interface JobDetailModalProps {
 const JobDetailModal = ({ job, onClose }: JobDetailModalProps) => {
     // Check multiple possible locations for video data
     const videoData = job.result?.video
-    const hasVideo = videoData && (videoData.video_url || videoData.video_path)
-    const videoUrl = videoData?.video_url || videoData?.download_url
+    const hasVideo = videoData && videoData.video_url && videoData.status !== 'error'
+    const videoUrl = videoData?.video_url
+    const downloadUrl = videoData?.download_url || `${videoData?.video_url}?download=true`
     const apiUrl = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000'
 
-    // Debug logging (remove in production)
-    console.log('Job data:', {
-        status: job.status,
-        hasResult: !!job.result,
-        hasVideo: !!videoData,
-        videoUrl: videoUrl,
-        videoData: videoData,
-        fullJob: job
-    })
+    // Debug logging
+    useEffect(() => {
+        console.log('📹 Job video status:', {
+            job_id: job.job_id,
+            status: job.status,
+            hasResult: !!job.result,
+            hasVideo: hasVideo,
+            videoUrl: videoUrl,
+            videoStatus: videoData?.status,
+            videoPath: videoData?.video_path
+        })
+    }, [job.job_id, job.status, hasVideo, videoUrl, videoData])
 
     return (
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black bg-opacity-50" onClick={onClose}>
@@ -47,17 +51,19 @@ const JobDetailModal = ({ job, onClose }: JobDetailModalProps) => {
 
                 {/* Content */}
                 <div className="p-6 space-y-6">
-                    {/* Debug Info (temporary) */}
-                    {job.status === 'completed' && !hasVideo && (
-                        <div className="bg-blue-50 border border-blue-200 rounded-lg p-4 text-xs">
-                            <p className="font-medium text-blue-900 mb-2">Debug Info:</p>
-                            <pre className="text-blue-800 overflow-x-auto">
-                                {JSON.stringify({
-                                    hasResult: !!job.result,
-                                    resultKeys: job.result ? Object.keys(job.result) : [],
-                                    videoData: videoData,
-                                }, null, 2)}
-                            </pre>
+                    {/* Warning for completed jobs without result data */}
+                    {job.status === 'completed' && !job.result && (
+                        <div className="bg-amber-50 border border-amber-300 rounded-lg p-4">
+                            <div className="flex items-start space-x-3">
+                                <AlertTriangle className="h-5 w-5 text-amber-600 mt-0.5" />
+                                <div>
+                                    <p className="font-medium text-amber-900">Result Data Missing</p>
+                                    <p className="text-sm text-amber-700 mt-1">
+                                        This job completed but result data was not saved.
+                                        Backend logs may contain more information.
+                                    </p>
+                                </div>
+                            </div>
                         </div>
                     )}
 
@@ -67,8 +73,8 @@ const JobDetailModal = ({ job, onClose }: JobDetailModalProps) => {
                             <div className="flex items-center justify-between mb-4">
                                 <h3 className="text-lg font-semibold text-gray-900">Generated Video</h3>
                                 <a
-                                    href={`${apiUrl}${videoData.download_url || videoUrl}?download=true`}
-                                    download
+                                    href={`${apiUrl}${downloadUrl}`}
+                                    download={`video_${job.job_id}.mp4`}
                                     className="inline-flex items-center space-x-2 px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors text-sm font-medium"
                                 >
                                     <Download className="h-4 w-4" />
@@ -80,9 +86,23 @@ const JobDetailModal = ({ job, onClose }: JobDetailModalProps) => {
                             <div className="relative rounded-lg overflow-hidden bg-black">
                                 <video
                                     controls
+                                    controlsList="nodownload"
+                                    preload="metadata"
+                                    playsInline
                                     className="w-full max-h-[500px] mx-auto"
                                     poster=""
-                                    preload="metadata"
+                                    onLoadedMetadata={(e) => {
+                                        const video = e.currentTarget
+                                        console.log('🎬 Video metadata loaded:', {
+                                            duration: video.duration,
+                                            videoWidth: video.videoWidth,
+                                            videoHeight: video.videoHeight,
+                                            readyState: video.readyState
+                                        })
+                                    }}
+                                    onError={(e) => {
+                                        console.error('❌ Video error:', e)
+                                    }}
                                 >
                                     <source src={`${apiUrl}${videoUrl}`} type="video/mp4" />
                                     Your browser does not support the video tag.
@@ -117,35 +137,47 @@ const JobDetailModal = ({ job, onClose }: JobDetailModalProps) => {
                         </div>
                     ) : (
                         <div className={`border rounded-lg p-6 text-center ${videoData?.status === 'error' || job.status === 'failed'
-                                ? 'bg-red-50 border-red-200'
+                            ? 'bg-red-50 border-red-200'
+                            : job.status === 'processing' || job.status === 'pending'
+                                ? 'bg-blue-50 border-blue-200'
                                 : 'bg-yellow-50 border-yellow-200'
                             }`}>
                             {videoData?.status === 'error' || job.status === 'failed' ? (
                                 <XCircle className="h-12 w-12 text-red-600 mx-auto mb-3" />
+                            ) : job.status === 'processing' || job.status === 'pending' ? (
+                                <Loader2 className="h-12 w-12 text-blue-600 mx-auto mb-3 animate-spin" />
                             ) : (
                                 <AlertTriangle className="h-12 w-12 text-yellow-600 mx-auto mb-3" />
                             )}
 
                             <h3 className={`text-lg font-semibold mb-2 ${videoData?.status === 'error' || job.status === 'failed'
-                                    ? 'text-red-900'
+                                ? 'text-red-900'
+                                : job.status === 'processing' || job.status === 'pending'
+                                    ? 'text-blue-900'
                                     : 'text-yellow-900'
                                 }`}>
                                 {videoData?.status === 'error' || job.status === 'failed'
                                     ? 'Video Generation Error'
-                                    : 'No Video Available'}
+                                    : job.status === 'processing' || job.status === 'pending'
+                                        ? 'Video Processing'
+                                        : 'No Video Available'}
                             </h3>
 
                             <p className={`text-sm ${videoData?.status === 'error' || job.status === 'failed'
-                                    ? 'text-red-700'
+                                ? 'text-red-700'
+                                : job.status === 'processing' || job.status === 'pending'
+                                    ? 'text-blue-700'
                                     : 'text-yellow-700'
                                 }`}>
                                 {videoData?.error
                                     ? videoData.error
                                     : job.status === 'processing' || job.status === 'pending'
-                                        ? 'Video is still being generated. Please wait...'
+                                        ? 'Video is still being generated. Please refresh in a moment...'
                                         : job.status === 'failed'
-                                            ? 'Video generation failed. Please try again.'
-                                            : 'Video not available for this job.'}
+                                            ? 'Video generation failed. Please check logs or try again.'
+                                            : !job.result
+                                                ? 'Result data missing. Backend may need to be checked.'
+                                                : 'Video not available for this job.'}
                             </p>
 
                             {/* Show additional error details if available */}
@@ -182,7 +214,14 @@ const JobDetailModal = ({ job, onClose }: JobDetailModalProps) => {
                                 <div>
                                     <p className="text-sm text-gray-600">Last Updated</p>
                                     <p className="text-base font-medium text-gray-900">
-                                        {new Date(job.updated_at).toLocaleString()}
+                                        {new Date(job.updated_at).toLocaleString(undefined, {
+                                            year: 'numeric',
+                                            month: '2-digit',
+                                            day: '2-digit',
+                                            hour: '2-digit',
+                                            minute: '2-digit',
+                                            hour12: false
+                                        })}
                                     </p>
                                 </div>
                             )}
@@ -190,7 +229,14 @@ const JobDetailModal = ({ job, onClose }: JobDetailModalProps) => {
                                 <div>
                                     <p className="text-sm text-gray-600">Completed At</p>
                                     <p className="text-base font-medium text-gray-900">
-                                        {new Date(job.completed_at).toLocaleString()}
+                                        {new Date(job.completed_at).toLocaleString(undefined, {
+                                            year: 'numeric',
+                                            month: '2-digit',
+                                            day: '2-digit',
+                                            hour: '2-digit',
+                                            minute: '2-digit',
+                                            hour12: false
+                                        })}
                                     </p>
                                 </div>
                             )}
@@ -371,8 +417,8 @@ export const JobsList = () => {
                     <button
                         onClick={() => setFilterStatus('all')}
                         className={`px-4 py-2 text-sm font-medium rounded-md transition-colors ${filterStatus === 'all'
-                                ? 'bg-white text-gray-900 shadow-sm'
-                                : 'text-gray-600 hover:text-gray-900'
+                            ? 'bg-white text-gray-900 shadow-sm'
+                            : 'text-gray-600 hover:text-gray-900'
                             }`}
                     >
                         All ({jobs.length})
@@ -380,8 +426,8 @@ export const JobsList = () => {
                     <button
                         onClick={() => setFilterStatus('active')}
                         className={`px-4 py-2 text-sm font-medium rounded-md transition-colors ${filterStatus === 'active'
-                                ? 'bg-white text-gray-900 shadow-sm'
-                                : 'text-gray-600 hover:text-gray-900'
+                            ? 'bg-white text-gray-900 shadow-sm'
+                            : 'text-gray-600 hover:text-gray-900'
                             }`}
                     >
                         Active ({jobs.filter(j => ['pending', 'processing'].includes(j.status)).length})
@@ -389,8 +435,8 @@ export const JobsList = () => {
                     <button
                         onClick={() => setFilterStatus('completed')}
                         className={`px-4 py-2 text-sm font-medium rounded-md transition-colors ${filterStatus === 'completed'
-                                ? 'bg-white text-gray-900 shadow-sm'
-                                : 'text-gray-600 hover:text-gray-900'
+                            ? 'bg-white text-gray-900 shadow-sm'
+                            : 'text-gray-600 hover:text-gray-900'
                             }`}
                     >
                         Completed ({jobs.filter(j => ['completed', 'completed_with_errors'].includes(j.status)).length})
@@ -447,7 +493,14 @@ export const JobsList = () => {
 
                                     {job.updated_at && (
                                         <p className="text-xs text-gray-500">
-                                            Updated: {new Date(job.updated_at).toLocaleString()}
+                                            Updated: {new Date(job.updated_at).toLocaleString(undefined, {
+                                                year: 'numeric',
+                                                month: '2-digit',
+                                                day: '2-digit',
+                                                hour: '2-digit',
+                                                minute: '2-digit',
+                                                hour12: false
+                                            })}
                                         </p>
                                     )}
                                 </div>

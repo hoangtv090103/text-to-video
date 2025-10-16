@@ -1,7 +1,7 @@
 'use client'
 
 import { useState } from 'react'
-import { Trash2, AlertTriangle, CheckCircle, Loader2 } from 'lucide-react'
+import { Trash2, AlertTriangle, CheckCircle, Loader2, Info } from 'lucide-react'
 import { LLMSettings } from './LLMSettings'
 
 export const AdminPanel = () => {
@@ -45,8 +45,23 @@ export const AdminPanel = () => {
                     <div className="p-2 bg-orange-100 rounded-lg">
                         <Trash2 className="h-6 w-6 text-orange-600" />
                     </div>
-                    <div>
-                        <h3 className="text-lg font-semibold text-gray-900">System Cleanup</h3>
+                    <div className="flex-1">
+                        <div className="flex items-center space-x-2">
+                            <h3 className="text-lg font-semibold text-gray-900">System Cleanup</h3>
+                            <div className="group relative">
+                                <Info className="h-4 w-4 text-blue-500 cursor-help" />
+                                <div className="invisible group-hover:visible absolute left-0 top-6 z-10 w-64 p-3 bg-gray-900 text-white text-xs rounded-lg shadow-lg">
+                                    <p className="font-medium mb-2">About System Cleanup:</p>
+                                    <ul className="space-y-1 list-disc list-inside">
+                                        <li>Removes jobs older than 24 hours</li>
+                                        <li>Cleans up temporary files and assets</li>
+                                        <li>Frees up disk space</li>
+                                        <li>Safe to run anytime - won't affect active jobs</li>
+                                    </ul>
+                                    <div className="absolute -top-1 left-2 w-2 h-2 bg-gray-900 transform rotate-45"></div>
+                                </div>
+                            </div>
+                        </div>
                         <p className="text-sm text-gray-600">
                             Remove expired jobs and clean up temporary files
                         </p>
@@ -145,22 +160,6 @@ export const AdminPanel = () => {
                             )}
                         </div>
                     )}
-                </div>
-            </div>
-
-            {/* Info Section */}
-            <div className="bg-blue-50 border border-blue-200 rounded-lg p-4">
-                <div className="flex items-start space-x-3">
-                    <AlertTriangle className="h-5 w-5 text-blue-600 mt-0.5 flex-shrink-0" />
-                    <div className="text-sm">
-                        <p className="font-medium text-blue-900 mb-1">About System Cleanup</p>
-                        <ul className="text-blue-800 space-y-1 list-disc list-inside">
-                            <li>Removes jobs older than 24 hours</li>
-                            <li>Cleans up temporary files and assets</li>
-                            <li>Frees up disk space</li>
-                            <li>Safe to run anytime - won't affect active jobs</li>
-                        </ul>
-                    </div>
                 </div>
             </div>
 
