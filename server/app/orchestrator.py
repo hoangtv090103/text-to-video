@@ -109,26 +109,56 @@ async def create_video_job(job_id: str, file: FileContext) -> None:
         # Try to compose video if we have valid scenes
         video_result = None
         try:
+            import os
+
             from app.services.video_composer_sync import compose_video_sync
 
             # Get segments data for video composition
             segments = job_data.get("segments", {})
             scenes_with_assets = []
 
+            # Get the server root directory for resolving relative paths
+            # __file__ is app/orchestrator.py, so go up 2 levels to get server/
+            server_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+
             for segment_id, segment_data in segments.items():
                 if (
                     segment_data.get("audio_status") == "success"
                     and segment_data.get("visual_status") == "success"
                 ):
+                    # Convert relative paths to absolute paths
+                    audio_path = segment_data.get("audio_path", "")
+                    visual_path = segment_data.get("visual_path", "")
+
+                    # Resolve relative paths against server root
+                    if audio_path and not os.path.isabs(audio_path):
+                        audio_path = os.path.abspath(os.path.join(server_root, audio_path))
+                    if visual_path and not os.path.isabs(visual_path):
+                        visual_path = os.path.abspath(os.path.join(server_root, visual_path))
+
+                    # Verify files exist before adding to composition list
+                    if not os.path.exists(audio_path):
+                        logger.warning(
+                            "Audio file not found for segment",
+                            extra={"job_id": job_id, "segment_id": segment_id, "path": audio_path}
+                        )
+                        continue
+                    if not os.path.exists(visual_path):
+                        logger.warning(
+                            "Visual file not found for segment",
+                            extra={"job_id": job_id, "segment_id": segment_id, "path": visual_path}
+                        )
+                        continue
+
                     scenes_with_assets.append(
                         {
                             "scene_id": int(segment_id),
                             "audio": {
-                                "path": segment_data.get("audio_path"),
+                                "path": audio_path,
                                 "duration": segment_data.get("audio_duration", 0),
                             },
                             "visual": {
-                                "path": segment_data.get("visual_path"),
+                                "path": visual_path,
                                 "visual_type": segment_data.get("visual_type", "slide"),
                             },
                         }
@@ -137,7 +167,11 @@ async def create_video_job(job_id: str, file: FileContext) -> None:
             if scenes_with_assets:
                 logger.info(
                     "Starting video composition",
-                    extra={"job_id": job_id, "scenes_count": len(scenes_with_assets)},
+                    extra={
+                        "job_id": job_id,
+                        "scenes_count": len(scenes_with_assets),
+                        "scene_ids": [s["scene_id"] for s in scenes_with_assets]
+                    },
                 )
 
                 video_result = compose_video_sync(scenes_with_assets, job_id)
@@ -191,7 +225,23 @@ async def create_video_job(job_id: str, file: FileContext) -> None:
             final_result["video"] = video_result
 
         # Save result to job service
-        await job_service.set_job_result(job_id, final_result)
+        logger.info(
+            "Saving job result",
+            extra={
+                "job_id": job_id,
+                "has_video": "video" in final_result,
+                "video_status": final_result.get("video", {}).get("status"),
+            },
+        )
+        try:
+            await job_service.set_job_result(job_id, final_result)
+            logger.info("Job result saved successfully", extra={"job_id": job_id})
+        except Exception as save_error:
+            logger.error(
+                "Failed to save job result",
+                extra={"job_id": job_id, "error": str(save_error)},
+                exc_info=True,
+            )
 
         if failed_tasks > 0:
             await job_service.set_job_status(

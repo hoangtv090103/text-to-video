@@ -175,6 +175,7 @@ class JobStore:
         return job.get("result") if job else None
 
     async def set_job_result(self, job_id: str, result: Dict[str, Any]) -> None:
+        logger.info(f"Setting result for job {job_id}, has_video: {'video' in result}")
         async with self._lock:
             job = self.jobs.setdefault(job_id, {"job_id": job_id, "segments": {}})
             job.update(
@@ -184,7 +185,12 @@ class JobStore:
                     "updated_at": datetime.utcnow().isoformat(),
                 }
             )
-            self._save_to_file()
+            try:
+                self._save_to_file()
+                logger.info(f"Result saved to file for job {job_id}")
+            except Exception as e:
+                logger.error(f"Failed to save job store to file: {e}", exc_info=True)
+                raise
 
     async def list_jobs(self, limit: int) -> List[str]:
         return list(self.jobs.keys())[:limit]

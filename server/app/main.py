@@ -18,8 +18,17 @@ from app.core.config import settings
 from app.core.error_handlers import register_exception_handlers
 from app.core.logging_config import setup_logging
 from app.orchestrator import create_video_job
+from app.schemas.admin import (
+    FetchModelsRequest,
+    FetchModelsResponse,
+    LLMConfigResponse,
+    LLMConfigUpdate,
+    TestModelRequest,
+    TestModelResponse,
+)
 from app.schemas.video import JobStatus, JobStatusResponse
 from app.services.job_service import job_service
+from app.services.llm_admin_service import LLMAdminService
 from app.services.llm_service import LLMService, check_llm_health
 from app.utils.file import FileContext
 
@@ -378,8 +387,22 @@ async def get_job_status(job_id: str):
                 if "video" in raw_result:
                     video_info = raw_result["video"]
                     # Add video URL if video exists
-                    if video_info.get("video_path") and os.path.exists(video_info["video_path"]):
-                        video_info["video_url"] = f"/api/v1/video/download/{job_id}"
+                    video_path = video_info.get("video_path")
+                    if video_path:
+                        # Convert to absolute path if relative
+                        if not os.path.isabs(video_path):
+                            video_path = os.path.abspath(video_path)
+                        logger.debug(
+                            "Checking video file",
+                            extra={
+                                "job_id": job_id,
+                                "video_path": video_path,
+                                "exists": os.path.exists(video_path),
+                            },
+                        )
+                        if os.path.exists(video_path):
+                            video_info["video_url"] = f"/api/v1/video/download/{job_id}"
+                            video_info["download_url"] = f"/api/v1/video/download/{job_id}?download=true"
                     result_data["video"] = video_info
 
                 # Handle script - convert list to count if needed
@@ -435,15 +458,17 @@ async def list_jobs(limit: int = 10):
         for job_id in job_ids:
             job_data = await job_service.get_job_status(job_id)
             if job_data:
-                jobs.append(
-                    {
-                        "job_id": job_id,
-                        "status": job_data.get("status", "unknown"),
-                        "message": job_data.get("message"),
-                        "progress": job_data.get("progress"),
-                        "updated_at": job_data.get("updated_at"),
-                    }
-                )
+                job_summary = {
+                    "job_id": job_id,
+                    "status": job_data.get("status", "unknown"),
+                    "message": job_data.get("message"),
+                    "progress": job_data.get("progress"),
+                    "updated_at": job_data.get("updated_at"),
+                }
+                # Include result if available (for completed jobs)
+                if "result" in job_data:
+                    job_summary["result"] = job_data["result"]
+                jobs.append(job_summary)
         return {"jobs": jobs, "total_count": len(jobs)}
     except Exception as exc:
         logger.error("Failed to list jobs", extra={"error": str(exc)})
@@ -597,6 +622,94 @@ async def stream_video(job_id: str):
     Stream video for viewing in browser.
     """
     return await download_video(job_id, download=False)
+
+
+# Admin LLM Configuration Endpoints
+@app.get(
+    "/api/v1/admin/llm/config",
+    tags=["admin"],
+    summary="Get LLM Configuration",
+    description="Get current LLM provider configuration",
+)
+async def get_llm_config():
+    """Get current LLM configuration"""
+    try:
+        config = LLMAdminService.get_current_config()
+        return LLMConfigResponse(**config)
+    except Exception as exc:
+        logger.error("Failed to get LLM config", extra={"error": str(exc)})
+        raise HTTPException(status_code=500, detail=f"Failed to get LLM config: {str(exc)}")
+
+
+@app.post(
+    "/api/v1/admin/llm/fetch-models",
+    tags=["admin"],
+    summary="Fetch Available Models",
+    description="Fetch available models from LLM provider",
+    response_model=FetchModelsResponse,
+)
+async def fetch_models(request: FetchModelsRequest):
+    """Fetch available models from provider"""
+    try:
+        result = await LLMAdminService.fetch_models(
+            provider=request.provider,
+            base_url=request.base_url,
+            api_key=request.api_key
+        )
+        return result
+    except Exception as exc:
+        logger.error("Failed to fetch models", extra={"error": str(exc)})
+        return FetchModelsResponse(
+            success=False,
+            error=f"Failed to fetch models: {str(exc)}"
+        )
+
+
+@app.post(
+    "/api/v1/admin/llm/test-model",
+    tags=["admin"],
+    summary="Test Model",
+    description="Test if a model is working properly",
+    response_model=TestModelResponse,
+)
+async def test_model(request: TestModelRequest):
+    """Test if a model is working"""
+    try:
+        result = await LLMAdminService.test_model(
+            provider=request.provider,
+            model=request.model,
+            base_url=request.base_url,
+            api_key=request.api_key
+        )
+        return result
+    except Exception as exc:
+        logger.error("Failed to test model", extra={"error": str(exc)})
+        return TestModelResponse(
+            success=False,
+            message=f"Failed to test model: {str(exc)}"
+        )
+
+
+@app.post(
+    "/api/v1/admin/llm/config",
+    tags=["admin"],
+    summary="Update LLM Configuration",
+    description="Update LLM provider configuration",
+)
+async def update_llm_config(config: LLMConfigUpdate):
+    """Update LLM configuration"""
+    try:
+        updated_config = LLMAdminService.update_config(
+            provider=config.provider,
+            base_url=config.base_url,
+            api_key=config.api_key,
+            model=config.model
+        )
+        logger.info("LLM configuration updated", extra={"provider": config.provider, "model": config.model})
+        return LLMConfigResponse(**updated_config)
+    except Exception as exc:
+        logger.error("Failed to update LLM config", extra={"error": str(exc)})
+        raise HTTPException(status_code=500, detail=f"Failed to update LLM config: {str(exc)}")
 
 
 if __name__ == "__main__":

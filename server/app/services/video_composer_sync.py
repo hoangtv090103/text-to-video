@@ -30,8 +30,8 @@ def _ken_burns(clip, zoom: float = 0.05):
     """
     from moviepy import vfx
 
-    # Slow zoom-in over the clip duration
-    return clip.fx(vfx.resize, lambda t: 1 + zoom * (t / max(clip.duration, 0.001)))
+    # Slow zoom-in over the clip duration (MoviePy 2.x API)
+    return clip.with_effects([vfx.Resize(lambda t: 1 + zoom * (t / max(clip.duration, 0.001)))])
 
 
 def compose_video_sync(scenes: list[dict], job_id: str) -> dict:
@@ -84,15 +84,15 @@ def compose_video_sync(scenes: list[dict], job_id: str) -> dict:
                 continue
 
             try:
-                # Create image clip with duration matching audio
-                img = ImageClip(img_path).set_duration(dur)
+                # Create image clip with duration matching audio (MoviePy 2.x API)
+                img = ImageClip(img_path, duration=dur)
 
                 # Apply Ken Burns zoom effect
                 img = _ken_burns(img, zoom=0.06)
 
                 # Load audio and attach to clip
                 audio = AudioFileClip(aud_path)
-                clip = img.set_audio(audio)
+                clip = img.with_audio(audio)
                 clips.append(clip)
 
                 logger.info(
