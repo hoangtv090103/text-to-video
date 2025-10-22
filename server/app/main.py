@@ -8,6 +8,11 @@ from contextlib import asynccontextmanager
 from enum import Enum
 from typing import Any
 
+# Suppress gRPC ALTS warnings when not running on GCP
+# Must be set before any gRPC-related imports (Google API, etc.)
+os.environ.setdefault('GRPC_VERBOSITY', 'ERROR')
+os.environ.setdefault('GRPC_TRACE', '')
+
 import httpx
 import uvicorn
 from fastapi import BackgroundTasks, FastAPI, File, HTTPException, Request, UploadFile
@@ -146,34 +151,55 @@ async def check_tts_health() -> bool:
         return False
 
 
+async def check_presenton_health() -> bool:
+    """Check if Presenton service is running and healthy."""
+    try:
+        async with httpx.AsyncClient(timeout=10.0) as client:
+            response = await client.get(f"{settings.PRESENTON_BASE_URL}/")
+            # Presenton returns 200 for home page when healthy
+            return response.status_code in [200, 404]  # 404 is OK for root endpoint
+    except Exception as exc:
+        logger.warning("Presenton health check failed", extra={"error": str(exc)})
+        return False
+
+
 async def startup_health_checks() -> None:
     max_retries = 12
     base_delay = 5.0
     logger.info("Starting dependency health checks")
 
+    # TTS health check (required)
     for attempt in range(max_retries):
         logger.info(f"Checking TTS service health (attempt {attempt + 1}/{max_retries})")
         if await check_tts_health():
-            logger.info("TTS service is healthy and model is loaded")
+            logger.info("✅ TTS service is healthy and model is loaded")
             break
         if attempt == max_retries - 1:
-            logger.error("TTS service failed health check after maximum retries")
+            logger.error("❌ TTS service failed health check after maximum retries")
             raise RuntimeError("TTS service is not ready")
         logger.warning(f"TTS service not ready, retrying in {base_delay}s")
         await asyncio.sleep(base_delay)
 
+    # LLM health check (required)
     for attempt in range(max_retries):
         logger.info(f"Checking LLM service health (attempt {attempt + 1}/{max_retries})")
         if await check_llm_health():
-            logger.info("LLM service is healthy")
+            logger.info("✅ LLM service is healthy")
             break
         if attempt == max_retries - 1:
-            logger.error("LLM service failed health check after maximum retries")
+            logger.error("❌ LLM service failed health check after maximum retries")
             raise RuntimeError("LLM service is not ready")
         logger.warning(f"LLM service not ready, retrying in {base_delay}s")
         await asyncio.sleep(base_delay)
 
-    logger.info("All dependency health checks passed")
+    # Presenton health check (optional - will use fallback if not available)
+    logger.info("Checking Presenton service health (optional, will fallback to matplotlib if unavailable)")
+    if await check_presenton_health():
+        logger.info("✅ Presenton service is healthy - high-quality slides enabled")
+    else:
+        logger.warning("⚠️ Presenton service not available - will use matplotlib fallback for slides")
+
+    logger.info("All critical dependency health checks passed")
 
 
 def ensure_storage_directories():

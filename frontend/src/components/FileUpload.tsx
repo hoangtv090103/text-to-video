@@ -12,7 +12,7 @@ export const FileUpload = () => {
     const [currentJobId, setCurrentJobId] = useState<string | null>(null)
     const [jobStatus, setJobStatus] = useState<JobStatusResponse | null>(null)
     const [isPolling, setIsPolling] = useState(false)
-    
+
     const { generateVideo, getJobStatus, isLoading, error } = useVideoGeneration()
 
     // Poll for job status when a job is running
@@ -95,7 +95,7 @@ export const FileUpload = () => {
         try {
             // Hide video player when starting new upload
             setJobStatus(null)
-            
+
             const response = await generateVideo(selectedFile)
             setCurrentJobId(response.job_id)
             setIsPolling(true)
@@ -146,15 +146,15 @@ export const FileUpload = () => {
                             <span>Download</span>
                         </a>
                     </div>
-                    
+
                     <VideoPlayer video={jobStatus.result.video} jobId={currentJobId!} />
-                    
+
                     <div className="mt-4 pt-4 border-t border-gray-200">
                         <div className="grid grid-cols-2 gap-4 text-sm">
                             <div>
                                 <span className="text-gray-600">Duration:</span>
                                 <span className="ml-2 font-medium text-gray-900">
-                                    {jobStatus.result.video?.duration_seconds 
+                                    {jobStatus.result.video?.duration_seconds
                                         ? `${jobStatus.result.video.duration_seconds.toFixed(1)}s`
                                         : 'N/A'}
                                 </span>
@@ -223,8 +223,8 @@ export const FileUpload = () => {
                         ${dragActive
                             ? 'border-blue-500 bg-blue-50 scale-105'
                             : selectedFile
-                            ? 'border-green-500 bg-green-50'
-                            : 'border-gray-300 hover:border-gray-400 bg-white'
+                                ? 'border-green-500 bg-green-50'
+                                : 'border-gray-300 hover:border-gray-400 bg-white'
                         }
                         ${isPolling ? 'opacity-50 pointer-events-none' : ''}
                     `}

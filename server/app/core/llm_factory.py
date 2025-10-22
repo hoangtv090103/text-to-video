@@ -76,7 +76,7 @@ class ModelCacheManager:
             if not api_key:
                 return ["gpt-3.5-turbo", "gpt-4", "gpt-4-turbo"]
 
-            async with httpx.AsyncClient(timeout=30.0) as client:
+            async with httpx.AsyncClient() as client:
                 response = await client.get(
                     "https://api.openai.com/v1/models",
                     headers={"Authorization": f"Bearer {api_key}"},
@@ -115,7 +115,7 @@ class ModelCacheManager:
             if not api_key:
                 return ["gemini-pro", "gemini-1.5-flash", "gemini-1.5-pro"]
 
-            async with httpx.AsyncClient(timeout=30.0) as client:
+            async with httpx.AsyncClient() as client:
                 response = await client.get(
                     f"https://generativelanguage.googleapis.com/v1beta/models?key={api_key}"
                 )
@@ -153,7 +153,7 @@ class ModelCacheManager:
                     "claude-3-opus-20240229",
                 ]
 
-            async with httpx.AsyncClient(timeout=30.0) as client:
+            async with httpx.AsyncClient() as client:
                 await client.get(
                     "https://api.anthropic.com/v1/messages",
                     headers={"x-api-key": api_key, "anthropic-version": "2023-06-01"},
@@ -189,7 +189,7 @@ class ModelCacheManager:
             import httpx
 
             try:
-                async with httpx.AsyncClient(timeout=5.0) as client:
+                async with httpx.AsyncClient() as client:
                     response = await client.get("http://localhost:11434/api/tags")
                     if response.status_code == 200:
                         data = response.json()
@@ -307,7 +307,7 @@ class LLMFactory:
                 "model": model,
                 "api_key": api_key,
                 "temperature": 0.1,  # Lower temperature for structured output
-                "max_tokens": 2048,
+                "max_tokens": 8192,  # Increased for longer video scripts
             }
 
             if base_url:
@@ -341,7 +341,7 @@ class LLMFactory:
                 "model": model,
                 "api_key": api_key,
                 "temperature": 0.1,
-                "max_tokens": 2048,
+                "max_tokens": 8192,  # Increased for longer video scripts
                 "convert_system_message_to_human": True,  # Required for Gemini
             }
 
@@ -373,7 +373,7 @@ class LLMFactory:
                 "model": model,
                 "api_key": api_key,
                 "temperature": 0.1,
-                "max_tokens": 2048,
+                "max_tokens": 8192,  # Increased for longer video scripts
             }
 
             # Merge with any additional config from settings
@@ -441,7 +441,7 @@ class LLMFactory:
                 model=model,
                 tokenizer=tokenizer,
                 device=device,
-                max_new_tokens=2048,
+                max_new_tokens=8192,  # Increased for longer video scripts
                 temperature=0.1,
                 do_sample=False,
             )
@@ -475,7 +475,7 @@ class LLMFactory:
                 from langchain_ollama import ChatOllama
 
                 try:
-                    response = requests.get("http://localhost:11434/api/tags", timeout=5)
+                    response = requests.get("http://localhost:11434/api/tags")
                     if response.status_code == 200:
                         config = {
                             "model": settings.LOCAL_MODEL_PATH or "llama2",
@@ -503,7 +503,7 @@ class LLMFactory:
                     "model": model_path,
                     "model_type": settings.LOCAL_MODEL_TYPE,
                     "temperature": 0.1,
-                    "max_new_tokens": 2048,
+                    "max_new_tokens": 8192,  # Increased for longer video scripts
                 }
 
                 if settings.LLM_CONFIG:
@@ -561,7 +561,7 @@ class LLMFactory:
                 "OPENAI_API_KEY": "sk-...",
                 "OPENAI_MODEL": "gpt-4",
                 "supported_models": ["gpt-3.5-turbo", "gpt-4", "gpt-4-turbo"],
-                "LLM_CONFIG": {"temperature": 0.1, "max_tokens": 2048},
+                "LLM_CONFIG": {"temperature": 0.1, "max_tokens": 8192},
             },
             LLMProvider.GOOGLE: {
                 "GOOGLE_API_KEY": "AIza...",

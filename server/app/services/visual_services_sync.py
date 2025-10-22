@@ -333,7 +333,7 @@ def _call_presenton_api_sync(visual_prompt: str, job_id: str, scene_id: int) -> 
             f"{presenton_url}/api/v1/ppt/presentation/generate",
             json=request_payload,
             headers={"Content-Type": "application/json"},
-            timeout=60,  # 60 second timeout
+            # timeout=60,  # 60 second timeout
         )
 
         if response.status_code != 200:

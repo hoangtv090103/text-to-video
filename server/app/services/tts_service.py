@@ -33,14 +33,12 @@ def create_tts_client():
     By disabling keepalive (max_keepalive_connections=0), each request gets a fresh
     connection, preventing the stale connection issue entirely.
     """
-    # Increased read timeout to 600s (10 minutes) for CPU-based TTS
-    # CPU TTS on Apple Silicon can take 3-10 minutes per request
-    # Also increased connect timeout to handle slow server responses
     timeout_config = httpx.Timeout(
-        connect=60.0, read=600.0, write=60.0, pool=15.0
+        connect=30.0,  # 30s to establish connection
+        read=600.0,    # 10 minutes to read response (TTS can be slow)
+        write=60.0,    # 1 minute to write request
+        pool=15.0      # 15s for pool operations
     )
-    # Disable connection keepalive to prevent stale connection reuse
-    # Use HTTP/1.1 explicitly to avoid HTTP/2 multiplexing issues
     limits = httpx.Limits(max_keepalive_connections=0, max_connections=5)
     return httpx.AsyncClient(
         timeout=timeout_config,

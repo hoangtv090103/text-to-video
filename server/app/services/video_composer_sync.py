@@ -53,46 +53,78 @@ def compose_video_sync(scenes: list[dict], job_id: str) -> dict:
         for scene in scenes:
             img_path = scene.get("visual", {}).get("path")
             aud_path = scene.get("audio", {}).get("path")
-            dur = float(scene.get("audio", {}).get("duration") or 0.0)
+            dur = float(scene.get("audio", {}).get("duration") or 5.0)  # Default 5s for silent clips
 
-            if not (img_path and aud_path and dur > 0):
+            # Require at least one asset (image OR audio)
+            if not (img_path or aud_path):
                 logger.warning(
-                    "Skipping invalid scene",
+                    "Skipping scene with no assets",
                     extra={
                         "job_id": job_id,
                         "scene_id": scene.get("scene_id"),
                         "has_image": bool(img_path),
                         "has_audio": bool(aud_path),
-                        "duration": dur,
                     },
                 )
                 continue
 
             # Verify files exist
-            if not os.path.exists(img_path):
+            img_exists = img_path and os.path.exists(img_path)
+            aud_exists = aud_path and os.path.exists(aud_path)
+            
+            if img_path and not img_exists:
                 logger.warning(
-                    "Image file not found, skipping scene",
+                    "Image file not found",
                     extra={"job_id": job_id, "scene_id": scene.get("scene_id"), "path": img_path},
                 )
-                continue
-
-            if not os.path.exists(aud_path):
+            
+            if aud_path and not aud_exists:
                 logger.warning(
-                    "Audio file not found, skipping scene",
+                    "Audio file not found",
                     extra={"job_id": job_id, "scene_id": scene.get("scene_id"), "path": aud_path},
+                )
+            
+            # Skip if no valid files exist
+            if not (img_exists or aud_exists):
+                logger.warning(
+                    "Skipping scene with no valid files",
+                    extra={"job_id": job_id, "scene_id": scene.get("scene_id")},
                 )
                 continue
 
             try:
-                # Create image clip with duration matching audio (MoviePy 2.x API)
-                img = ImageClip(img_path, duration=dur)
-
-                # Apply Ken Burns zoom effect
-                img = _ken_burns(img, zoom=0.06)
-
-                # Load audio and attach to clip
-                audio = AudioFileClip(aud_path)
-                clip = img.with_audio(audio)
+                # Create clip based on available assets
+                if img_exists and aud_exists:
+                    # Both assets available - create video with audio
+                    img = ImageClip(img_path, duration=dur)
+                    img = _ken_burns(img, zoom=0.06)
+                    audio = AudioFileClip(aud_path)
+                    clip = img.with_audio(audio)
+                    
+                elif img_exists and not aud_exists:
+                    # Only visual - create silent clip with default duration
+                    logger.info(
+                        "Creating silent clip (no audio)",
+                        extra={"job_id": job_id, "scene_id": scene.get("scene_id")}
+                    )
+                    img = ImageClip(img_path, duration=dur)
+                    img = _ken_burns(img, zoom=0.06)
+                    clip = img
+                    
+                elif aud_exists and not img_exists:
+                    # Only audio - create black screen with audio
+                    logger.info(
+                        "Creating audio-only clip (black screen)",
+                        extra={"job_id": job_id, "scene_id": scene.get("scene_id")}
+                    )
+                    from moviepy import ColorClip
+                    img = ColorClip(size=(1920, 1080), color=(0, 0, 0), duration=dur)
+                    audio = AudioFileClip(aud_path)
+                    clip = img.with_audio(audio)
+                else:
+                    # Should not reach here due to earlier checks
+                    continue
+                    
                 clips.append(clip)
 
                 logger.info(

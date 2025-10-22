@@ -15,7 +15,9 @@ composer = Composer()
 
 async def create_video_job(job_id: str, file: FileContext) -> None:
     """Orchestrate video generation for a job."""
-    logger.info("Starting video job creation", extra={"job_id": job_id, "uploaded_file": file.filename})
+    logger.info(
+        "Starting video job creation", extra={"job_id": job_id, "uploaded_file": file.filename}
+    )
 
     try:
         # Validate file context
@@ -122,47 +124,83 @@ async def create_video_job(job_id: str, file: FileContext) -> None:
             server_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
             for segment_id, segment_data in segments.items():
-                if (
-                    segment_data.get("audio_status") == "success"
-                    and segment_data.get("visual_status") == "success"
-                ):
-                    # Convert relative paths to absolute paths
-                    audio_path = segment_data.get("audio_path", "")
-                    visual_path = segment_data.get("visual_path", "")
-
-                    # Resolve relative paths against server root
-                    if audio_path and not os.path.isabs(audio_path):
-                        audio_path = os.path.abspath(os.path.join(server_root, audio_path))
-                    if visual_path and not os.path.isabs(visual_path):
-                        visual_path = os.path.abspath(os.path.join(server_root, visual_path))
-
-                    # Verify files exist before adding to composition list
-                    if not os.path.exists(audio_path):
-                        logger.warning(
-                            "Audio file not found for segment",
-                            extra={"job_id": job_id, "segment_id": segment_id, "path": audio_path}
-                        )
-                        continue
-                    if not os.path.exists(visual_path):
-                        logger.warning(
-                            "Visual file not found for segment",
-                            extra={"job_id": job_id, "segment_id": segment_id, "path": visual_path}
-                        )
-                        continue
-
-                    scenes_with_assets.append(
-                        {
-                            "scene_id": int(segment_id),
-                            "audio": {
-                                "path": audio_path,
-                                "duration": segment_data.get("audio_duration", 0),
-                            },
-                            "visual": {
-                                "path": visual_path,
-                                "visual_type": segment_data.get("visual_type", "slide"),
-                            },
-                        }
+                audio_status = segment_data.get("audio_status")
+                visual_status = segment_data.get("visual_status")
+                
+                # Allow scenes with at least one successful asset (audio OR visual)
+                # This makes video composition more resilient to partial failures
+                has_audio = audio_status == "success"
+                has_visual = visual_status == "success"
+                
+                if not (has_audio or has_visual):
+                    # Skip only if BOTH assets failed
+                    logger.debug(
+                        "Skipping segment with no successful assets",
+                        extra={"job_id": job_id, "segment_id": segment_id}
                     )
+                    continue
+                
+                # Convert relative paths to absolute paths
+                audio_path = segment_data.get("audio_path", "")
+                visual_path = segment_data.get("visual_path", "")
+
+                # Resolve relative paths against server root
+                if audio_path and not os.path.isabs(audio_path):
+                    audio_path = os.path.abspath(os.path.join(server_root, audio_path))
+                if visual_path and not os.path.isabs(visual_path):
+                    visual_path = os.path.abspath(os.path.join(server_root, visual_path))
+
+                # Verify files exist before adding to composition list
+                audio_exists = has_audio and audio_path and os.path.exists(audio_path)
+                visual_exists = has_visual and visual_path and os.path.exists(visual_path)
+                
+                if has_audio and not audio_exists:
+                    logger.warning(
+                        "Audio file not found for segment",
+                        extra={"job_id": job_id, "segment_id": segment_id, "path": audio_path},
+                    )
+                    has_audio = False
+                    
+                if has_visual and not visual_exists:
+                    logger.warning(
+                        "Visual file not found for segment",
+                        extra={"job_id": job_id, "segment_id": segment_id, "path": visual_path},
+                    )
+                    has_visual = False
+                
+                # Skip if no valid files exist
+                if not (audio_exists or visual_exists):
+                    logger.warning(
+                        "No valid files found for segment",
+                        extra={"job_id": job_id, "segment_id": segment_id}
+                    )
+                    continue
+
+                scene_data = {"scene_id": int(segment_id)}
+                
+                if audio_exists:
+                    scene_data["audio"] = {
+                        "path": audio_path,
+                        "duration": segment_data.get("audio_duration", 0),
+                    }
+                else:
+                    logger.info(
+                        "Creating silent scene (no audio)",
+                        extra={"job_id": job_id, "segment_id": segment_id}
+                    )
+                    
+                if visual_exists:
+                    scene_data["visual"] = {
+                        "path": visual_path,
+                        "visual_type": segment_data.get("visual_type", "slide"),
+                    }
+                else:
+                    logger.info(
+                        "Scene has audio but no visual",
+                        extra={"job_id": job_id, "segment_id": segment_id}
+                    )
+                
+                scenes_with_assets.append(scene_data)
 
             if scenes_with_assets:
                 logger.info(
@@ -170,26 +208,35 @@ async def create_video_job(job_id: str, file: FileContext) -> None:
                     extra={
                         "job_id": job_id,
                         "scenes_count": len(scenes_with_assets),
-                        "scene_ids": [s["scene_id"] for s in scenes_with_assets]
+                        "scene_ids": [s["scene_id"] for s in scenes_with_assets],
                     },
                 )
 
                 video_result = compose_video_sync(scenes_with_assets, job_id)
 
-                if video_result.get("status") == "success":
+                if video_result and video_result.get("status") == "success":
                     logger.info(
                         "Video composition completed successfully",
                         extra={
                             "job_id": job_id,
                             "video_path": video_result.get("video_path"),
                             "duration": video_result.get("duration"),
+                            "has_video_result": True,
                         },
                     )
                 else:
                     logger.error(
-                        "Video composition failed",
-                        extra={"job_id": job_id, "error": video_result.get("error")},
+                        "Video composition failed or returned error",
+                        extra={
+                            "job_id": job_id,
+                            "video_result": video_result,
+                            "error": video_result.get("error")
+                            if video_result
+                            else "No result returned",
+                        },
                     )
+                    # Set video_result to None to avoid adding empty result
+                    video_result = None
             else:
                 logger.warning("No valid scenes for video composition", extra={"job_id": job_id})
 
@@ -201,11 +248,14 @@ async def create_video_job(job_id: str, file: FileContext) -> None:
                     "error": f"Composition module not found: {str(import_error)}",
                 },
             )
+            video_result = None
         except Exception as composition_error:
             logger.error(
-                "Video composition failed",
+                "Video composition failed with exception",
                 extra={"job_id": job_id, "error": str(composition_error)},
+                exc_info=True,
             )
+            video_result = None
 
         # Prepare final result
         final_result = {
