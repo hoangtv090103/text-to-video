@@ -40,7 +40,7 @@ export const VideoPlayer = ({ video, jobId, className = '' }: VideoPlayerProps) 
 
     return (
         <div className={`bg-gray-50 rounded-lg p-4 ${className}`}>
-            <div className="flex items-center justify-between mb-3">
+            {/* <div className="flex items-center justify-between mb-3">
                 <h5 className="text-sm font-medium text-gray-700">Generated Video</h5>
                 <div className="flex space-x-2">
                     <a
@@ -61,7 +61,7 @@ export const VideoPlayer = ({ video, jobId, className = '' }: VideoPlayerProps) 
                         Download
                     </a>
                 </div>
-            </div>
+            </div> */}
 
             <div className="relative group">
                 <video
