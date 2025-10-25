@@ -4,6 +4,7 @@ import { useState } from 'react'
 import { FileUpload } from '@/components/FileUpload'
 import { JobsList } from '@/components/JobsList'
 import { AdminPanel } from '@/components/AdminPanel'
+import { ConnectionStatus } from '@/components/ConnectionStatus'
 
 export default function Home() {
   const [activeTab, setActiveTab] = useState('upload')
@@ -25,9 +26,7 @@ export default function Home() {
             </div>
 
             <div className="flex items-center space-x-4">
-              <div className="text-sm text-gray-600">
-                Status: <span className="text-green-600 font-medium">Online</span>
-              </div>
+              <ConnectionStatus />
             </div>
           </div>
         </div>

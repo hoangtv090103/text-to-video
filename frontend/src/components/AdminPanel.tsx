@@ -3,6 +3,7 @@
 import { useState } from 'react'
 import { Trash2, AlertTriangle, CheckCircle, Loader2, Info } from 'lucide-react'
 import { LLMSettings } from './LLMSettings'
+import { ConnectionTest } from './ConnectionTest'
 
 export const AdminPanel = () => {
     const [isCleaning, setIsCleaning] = useState(false)
@@ -36,6 +37,9 @@ export const AdminPanel = () => {
 
     return (
         <div className="max-w-4xl mx-auto space-y-6">
+            {/* Connection Test Section */}
+            <ConnectionTest />
+
             {/* LLM Settings Section */}
             <LLMSettings />
 

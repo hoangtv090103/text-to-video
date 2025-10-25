@@ -83,14 +83,9 @@ export interface HealthResponse {
   dependencies: {
     tts_service: string
     llm_service: string
-    redis_service: string
   }
-  circuit_breakers: {
-    tts: string
-    llm: string
-    redis: string
-  }
-  timestamp: number
+  timestamp: string
+  error?: string
 }
 
 export interface ApiError {
