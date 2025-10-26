@@ -1,20 +1,20 @@
-# Use Node.js 18 Alpine for smaller image size
-FROM node:18-alpine
+# Use Bun base image
+FROM --platform=linux/amd64 oven/bun:1-alpine
 
 # Set working directory
 WORKDIR /app
 
 # Copy package files
-COPY package*.json ./
+COPY package.json bun.lockb* ./
 
-# Install dependencies
-RUN npm ci --only=production
+# Install all dependencies (including dev dependencies for build)
+RUN bun install --frozen-lockfile
 
 # Copy source code
 COPY . .
 
 # Build the application
-RUN npm run build
+RUN bun run build
 
 # Expose port
 EXPOSE 3000
@@ -24,5 +24,5 @@ ENV NODE_ENV=production
 ENV NEXT_PUBLIC_API_URL=http://localhost:8000
 
 # Start the application
-CMD ["npm", "start"]
+CMD ["bun", "run", "start"]
 

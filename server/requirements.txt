@@ -20,6 +20,7 @@ imageio-ffmpeg
 Pygments
 mermaid-py
 cairosvg
+psutil>=5.9.0
 
 # LangChain ecosystem for configurable LLM providers
 langchain>=0.1.0
@@ -53,3 +54,4 @@ mypy>=1.7.0
 ruff>=0.1.0
 
 moviepy
+psutil

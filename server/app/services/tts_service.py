@@ -1,15 +1,16 @@
 import asyncio
 import logging
 import os
-import aiofiles
-from typing import Dict
+from typing import Optional
 from uuid import uuid4
 
+import aiofiles
 import httpx
 from pydub import AudioSegment
 
 from app.asset_router import exponential_backoff_retry
 from app.core.config import settings
+from app.core.resource_manager import resource_manager
 
 CHATTERBOX_API_URL = settings.TTS_SERVICE_URL
 
@@ -17,38 +18,66 @@ logger = logging.getLogger(__name__)
 
 ASSET_STORAGE_PATH = settings.ASSET_STORAGE_PATH
 
-# Semaphore to limit concurrent TTS requests (CPU TTS can't handle many parallel requests)
-# CRITICAL: Set to 1 for CPU-based TTS to prevent server overload and connection errors
-_tts_semaphore = asyncio.Semaphore(1)  # Only 1 concurrent TTS request to prevent overload
+# Global HTTP client pool for better connection reuse
+_tts_client_pool: httpx.AsyncClient | None = None
+_pool_lock = asyncio.Lock()
 
-def create_tts_client():
+async def get_tts_client() -> httpx.AsyncClient:
     """
-    Create a fresh HTTP client for TTS requests.
-
-    **CRITICAL**: We create a new client per request instead of reusing a global one
-    because the CPU-based TTS server is very slow (60-120s per request) and connection
-    pooling with keepalive causes "Server disconnected without sending a response" errors
-    when connections become stale between long requests.
-
-    By disabling keepalive (max_keepalive_connections=0), each request gets a fresh
-    connection, preventing the stale connection issue entirely.
+    Get or create a shared HTTP client for TTS requests with optimized connection pooling.
+    
+    Uses a global client pool with proper connection management for better performance
+    while handling the slow TTS server appropriately.
     """
-    timeout_config = httpx.Timeout(
-        connect=30.0,  # 30s to establish connection
-        read=600.0,    # 10 minutes to read response (TTS can be slow)
-        write=60.0,    # 1 minute to write request
-        pool=15.0      # 15s for pool operations
-    )
-    limits = httpx.Limits(max_keepalive_connections=0, max_connections=5)
-    return httpx.AsyncClient(
-        timeout=timeout_config,
-        limits=limits,
-        http2=False  # Disable HTTP/2 to avoid protocol issues
-    )
+    global _tts_client_pool
+    
+    async with _pool_lock:
+        if _tts_client_pool is None or _tts_client_pool.is_closed:
+            timeout_config = httpx.Timeout(
+                connect=30.0,  # 30s to establish connection
+                read=1200.0,   # 20 minutes to read response (increased for stability)
+                write=60.0,    # 1 minute to write request
+                pool=30.0      # 30s for pool operations
+            )
+            limits = httpx.Limits(
+                max_keepalive_connections=2,  # Allow some keepalive for efficiency
+                max_connections=3,           # Limit total connections
+                keepalive_expiry=60.0        # Short keepalive to avoid stale connections
+            )
+            _tts_client_pool = httpx.AsyncClient(
+                timeout=timeout_config,
+                limits=limits,
+                http2=False  # Disable HTTP/2 to avoid protocol issues
+            )
+            logger.info("Created new TTS client pool")
+    
+    return _tts_client_pool
 
 
-@exponential_backoff_retry(max_retries=2, base_delay=5.0)
-async def generate_audio(scene: Dict) -> Dict:
+async def close_tts_client():
+    """Close the global TTS client pool"""
+    global _tts_client_pool
+    
+    async with _pool_lock:
+        if _tts_client_pool and not _tts_client_pool.is_closed:
+            await _tts_client_pool.aclose()
+            _tts_client_pool = None
+            logger.info("Closed TTS client pool")
+
+
+async def check_tts_service_health() -> bool:
+    """Quick health check for TTS service before making requests."""
+    try:
+        async with httpx.AsyncClient(timeout=5.0) as client:
+            response = await client.get(f"{CHATTERBOX_API_URL.replace('/v1/audio/speech', '/v1/health')}")
+            return response.status_code == 200
+    except Exception as e:
+        logger.warning(f"TTS health check failed: {e}")
+        return False
+
+
+@exponential_backoff_retry(max_retries=3, base_delay=10.0)
+async def generate_audio(scene: dict) -> dict:
     """
     Asynchronous TTS service that generates audio from scene narration text.
 
@@ -62,6 +91,7 @@ async def generate_audio(scene: Dict) -> Dict:
         Exception: On request failures or service errors
     """
     seg_id = scene.get("id", "")
+    job_id = scene.get("job_id", "unknown")
     text_input = scene.get("narration_text", "")
 
     if not text_input:
@@ -72,35 +102,73 @@ async def generate_audio(scene: Dict) -> Dict:
             "path": None,
             "duration": 0,
         }
+    
+    # Health check before processing
+    logger.info(f"Checking TTS service health before processing scene {seg_id}")
+    tts_healthy = await check_tts_service_health()
+    if not tts_healthy:
+        logger.error(f"TTS service unhealthy before processing scene {seg_id}, will retry")
+        # Wait a bit for service to recover
+        await asyncio.sleep(5)
+        raise Exception("TTS service is not healthy")
 
     # Check cache first for TTS audio
     from app.utils.cache import get_from_cache, set_cache
     cached_result = await get_from_cache("tts", text_input)
-    if cached_result:
-        return cached_result
+
+    # Ensure asset storage directory exists
+    os.makedirs(ASSET_STORAGE_PATH, exist_ok=True)
+
+    # Generate unique file path for this segment with job_id
+    file_path = os.path.join(ASSET_STORAGE_PATH, f"job_{job_id}_segment_{seg_id}.wav")
+
+    if cached_result and cached_result.get("path"):
+        # Cache hit - copy the cached audio file to new path for this segment
+        import shutil
+        cached_path = cached_result.get("path")
+        if os.path.exists(cached_path):
+            try:
+                await asyncio.to_thread(shutil.copy2, cached_path, file_path)
+                logger.info(
+                    f"Using cached TTS audio (copied to new file for segment {seg_id})",
+                    extra={
+                        "segment_id": seg_id,
+                        "cached_path": cached_path,
+                        "new_path": file_path,
+                        "duration": cached_result.get("duration")
+                    }
+                )
+                return {
+                    "path": file_path,
+                    "duration": cached_result.get("duration", 0),
+                    "status": "success",
+                    "cached": True
+                }
+            except Exception as copy_error:
+                logger.warning(
+                    "Failed to copy cached audio file, will regenerate",
+                    extra={"segment_id": seg_id, "error": str(copy_error)}
+                )
+        else:
+            logger.warning(
+                "Cached audio file not found, will regenerate",
+                extra={"segment_id": seg_id, "cached_path": cached_path}
+            )
 
     payload = {
         "input": text_input,
         "voice": "alloy",
         "response_format": "wav",
         "speed": 1,
-        "exaggeration": 0.25,  # Lower values = faster generation
-        "cfg_weight": 0.5,  # Lower values = faster generation
-        "temperature": 0.3,  # Higher values = faster generation
+        "exaggeration": 0.2,  # Lower values = faster generation, more stable
+        "cfg_weight": 0.4,  # Lower values = faster generation, more stable
+        "temperature": 0.2,  # Lower values = more stable generation
+        "max_chunk_length": 200,  # Smaller chunks for stability
+        "max_total_length": 2000,  # Limit total length
     }
 
-    # Create a fresh client per request to avoid stale connection pooling issues
-    # (CPU TTS is very slow, connections can become stale between requests)
-    client = create_tts_client()
-
-    # Ensure asset storage directory exists
-    os.makedirs(ASSET_STORAGE_PATH, exist_ok=True)
-
-    # Generate unique file path
-    file_path = os.path.join(ASSET_STORAGE_PATH, f"segment_{seg_id}_{uuid4()}.wav")
-
-    # Limit concurrent TTS requests to avoid overwhelming CPU-based TTS server
-    async with _tts_semaphore:
+    # Use resource manager to acquire TTS slot
+    async with resource_manager.acquire_tts_slot(str(seg_id)):
         logger.info(
             f"Acquired TTS slot for scene {seg_id}",
             extra={
@@ -109,6 +177,10 @@ async def generate_audio(scene: Dict) -> Dict:
                 "tts_url": CHATTERBOX_API_URL
             }
         )
+        
+        # Get shared client from pool
+        client = await get_tts_client()
+        
         try:
             # Stream download and save asynchronously for better memory usage
             async with client.stream("POST", f"{CHATTERBOX_API_URL}", json=payload) as response:
@@ -130,6 +202,35 @@ async def generate_audio(scene: Dict) -> Dict:
                     f"TTS audio stream completed for scene {seg_id}",
                     extra={"segment_id": seg_id, "bytes_written": bytes_written}
                 )
+        except httpx.RemoteProtocolError as e:
+            logger.error(
+                f"TTS server disconnected unexpectedly for scene {seg_id}",
+                extra={
+                    "segment_id": seg_id,
+                    "error": str(e),
+                    "error_type": "RemoteProtocolError",
+                    "tts_url": CHATTERBOX_API_URL,
+                    "suggestion": "TTS service may be overloaded or crashed"
+                },
+                exc_info=True
+            )
+            # Wait before retry to give service time to recover
+            await asyncio.sleep(15)
+            raise Exception(f"TTS server disconnected: {str(e)}") from e
+        except httpx.HTTPStatusError as e:
+            logger.error(
+                f"TTS returned error status for scene {seg_id}",
+                extra={
+                    "segment_id": seg_id,
+                    "status_code": e.response.status_code,
+                    "error": str(e),
+                    "error_type": "HTTPStatusError",
+                    "tts_url": CHATTERBOX_API_URL,
+                    "response_text": e.response.text[:500] if hasattr(e.response, 'text') else None
+                },
+                exc_info=True
+            )
+            raise Exception(f"TTS HTTP error: {str(e)}") from e
         except Exception as e:
             logger.error(
                 f"TTS request failed for scene {seg_id}",
@@ -141,11 +242,7 @@ async def generate_audio(scene: Dict) -> Dict:
                 },
                 exc_info=True
             )
-            raise
-        finally:
-            # Always close the client to free resources
-            await client.aclose()
-            logger.debug(f"TTS client closed for scene {seg_id}", extra={"segment_id": seg_id})
+            raise Exception(f"TTS request failed: {str(e)}") from e
 
     logger.info(f"Successfully saved TTS audio to {file_path}", extra={"segment_id": seg_id})
 

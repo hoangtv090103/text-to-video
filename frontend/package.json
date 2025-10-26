@@ -3,10 +3,10 @@
   "version": "0.1.0",
   "private": true,
   "scripts": {
-    "dev": "next dev --turbopack",
-    "build": "next build --turbopack",
-    "start": "next start",
-    "lint": "eslint"
+    "dev": "bun run next dev --turbopack",
+    "build": "bun run next build",
+    "start": "bun run next start",
+    "lint": "bun run eslint"
   },
   "dependencies": {
     "@tanstack/react-query": "^5.90.2",

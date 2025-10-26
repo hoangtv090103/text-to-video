@@ -1,7 +1,6 @@
 import logging
 import os
 import time
-from typing import Dict
 from uuid import uuid4
 
 import requests
@@ -57,7 +56,7 @@ def exponential_backoff_retry_sync(max_retries=3, base_delay=1.0):
 
 
 @exponential_backoff_retry_sync(max_retries=3, base_delay=1.0)
-def generate_audio_sync(scene: Dict) -> Dict:
+def generate_audio_sync(scene: dict) -> dict:
     """
     Synchronous TTS service that generates audio from scene narration text.
 
@@ -82,6 +81,16 @@ def generate_audio_sync(scene: Dict) -> Dict:
             "duration": 0,
         }
 
+    # Check cache first for TTS audio (sync version)
+    # Note: Sync version doesn't use Redis cache, but we keep the structure consistent
+    # If you want to add caching for sync version, implement it here
+
+    # Ensure asset storage directory exists
+    os.makedirs(ASSET_STORAGE_PATH, exist_ok=True)
+
+    # Generate unique file path for this segment
+    file_path = os.path.join(ASSET_STORAGE_PATH, f"segment_{seg_id}_{uuid4()}.wav")
+
     payload = {
         "input": text_input,
         "voice": "alloy",
@@ -95,12 +104,6 @@ def generate_audio_sync(scene: Dict) -> Dict:
     # Use requests instead of httpx for synchronous calls
     response = requests.post(CHATTERBOX_API_URL, json=payload)
     response.raise_for_status()
-
-    # Ensure asset storage directory exists
-    os.makedirs(ASSET_STORAGE_PATH, exist_ok=True)
-
-    # Generate unique file path
-    file_path = os.path.join(ASSET_STORAGE_PATH, f"segment_{seg_id}_{uuid4()}.wav")
 
     # Save audio file
     with open(file_path, "wb") as f:

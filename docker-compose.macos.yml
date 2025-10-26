@@ -29,10 +29,10 @@ services:
       resources:
         limits:
           cpus: '0'  # Use all available CPUs
-          memory: 6G
+          memory: 16G  # Increased memory limit for TTS stability
         reservations:
-          cpus: '4'
-          memory: 4G
+          cpus: '6'
+          memory: 8G  # Increased reservation for TTS
 
     # Docker Desktop optimizations
     platform: linux/arm64
@@ -59,9 +59,15 @@ services:
       - VOICE_LIBRARY_DIR=/voices
 
       # Memory management - aggressive for CPU
-      - MEMORY_CLEANUP_INTERVAL=${MEMORY_CLEANUP_INTERVAL:-3}
-      - CUDA_CACHE_CLEAR_INTERVAL=${CUDA_CACHE_CLEAR_INTERVAL:-2}
+      - MEMORY_CLEANUP_INTERVAL=${MEMORY_CLEANUP_INTERVAL:-1}
+      - CUDA_CACHE_CLEAR_INTERVAL=${CUDA_CACHE_CLEAR_INTERVAL:-1}
       - ENABLE_MEMORY_MONITORING=${ENABLE_MEMORY_MONITORING:-true}
+      - PYTORCH_CUDA_ALLOC_CONF=max_split_size_mb:256,expandable_segments:True
+      
+      # Additional memory optimizations
+      - PYTORCH_MPS_HIGH_WATERMARK_RATIO=0.0
+      - TOKENIZERS_PARALLELISM=false
+      - PYTORCH_MEMORY_EFFICIENT_ATTENTION=1
 
       # CPU optimization environment variables
       - OMP_NUM_THREADS=8
@@ -94,11 +100,11 @@ services:
 
     # Use tmpfs for temporary files to improve I/O performance
     tmpfs:
-      - /tmp:size=1G,noexec,nosuid,nodev
-      - /var/tmp:size=512M,noexec,nosuid,nodev
+      - /tmp:size=2G,noexec,nosuid,nodev
+      - /var/tmp:size=1G,noexec,nosuid,nodev
 
     # Optimize shared memory for better performance
-    shm_size: 2g
+    shm_size: 4g
 
     # Use host network mode for better performance (optional)
     # network_mode: host  # Uncomment if you need maximum performance
@@ -112,42 +118,52 @@ services:
       retries: 5
       start_period: 10m  # Give it more time to initialize
 
-  # server:
-  #   build: ./server
-  #   ports:
-  #     - "8000:8000"
-  #   environment:
-  #     - LOG_LEVEL=${LOG_LEVEL:-info}
-  #     - LLM_URL=${LLM_URL}
-  #     - LLM_API_KEY=${LLM_API_KEY}
-  #     - LLM_MODEL=${LLM_MODEL}
-  #     - LLM_PROVIDER=${LLM_PROVIDER:-openai}
-  #     - OPENAI_API_KEY=${OPENAI_API_KEY}
-  #     - OPENAI_MODEL=${OPENAI_MODEL:-gpt-3.5-turbo}
-  #     - GOOGLE_API_KEY=${GOOGLE_API_KEY}
-  #     - GOOGLE_MODEL=${GOOGLE_MODEL:-gemini-pro}
-  #     - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY}
-  #     - ANTHROPIC_MODEL=${ANTHROPIC_MODEL:-claude-3-sonnet-20240229}
-  #     - HUGGINGFACE_MODEL=${HUGGINGFACE_MODEL:-google/flan-t5-base}
-  #     - HUGGINGFACE_API_KEY=${HUGGINGFACE_API_KEY}
-  #     - LOCAL_MODEL_PATH=${LOCAL_MODEL_PATH:-llama2}
-  #     - LOCAL_MODEL_TYPE=${LOCAL_MODEL_TYPE:-llama}
-  #   depends_on:
-  #     - chatterbox-tts
-  #   restart: unless-stopped
-  #   user: "0"
+  server:
+    build: ./server
+    container_name: text-to-video-server
+    ports:
+      - "8000:8000"
+    environment:
+      - LOG_LEVEL=${LOG_LEVEL:-info}
+      - REDIS_HOST=redis
+      - REDIS_PORT=6379
+      - TTS_SERVICE_URL=http://chatterbox-tts:4123/v1/audio/speech
+      - PRESENTON_BASE_URL=http://presenton:80
+      - LLM_URL=${LLM_URL}
+      - LLM_API_KEY=${LLM_API_KEY}
+      - LLM_MODEL=${LLM_MODEL}
+      - LLM_PROVIDER=${LLM_PROVIDER:-openai}
+      - OPENAI_API_KEY=${OPENAI_API_KEY}
+      - OPENAI_MODEL=${OPENAI_MODEL:-gpt-3.5-turbo}
+      - GOOGLE_API_KEY=${GOOGLE_API_KEY}
+      - GOOGLE_MODEL=${GOOGLE_MODEL:-gemini-pro}
+      - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY}
+      - ANTHROPIC_MODEL=${ANTHROPIC_MODEL:-claude-3-sonnet-20240229}
+      - HUGGINGFACE_MODEL=${HUGGINGFACE_MODEL:-google/flan-t5-base}
+      - HUGGINGFACE_API_KEY=${HUGGINGFACE_API_KEY}
+      - LOCAL_MODEL_PATH=${LOCAL_MODEL_PATH:-llama2}
+      - LOCAL_MODEL_TYPE=${LOCAL_MODEL_TYPE:-llama}
+    volumes:
+      - ./server/data:/app/data
+    depends_on:
+      - redis
+      - chatterbox-tts
+      - presenton
+    restart: unless-stopped
+    user: "0"
 
-  # frontend:
-  #   profiles: ["frontend", "ui", "fullstack"]
-  #   build:
-  #     context: ./chatterbox-tts-api/frontend
-  #     dockerfile: Dockerfile
-  #   container_name: chatterbox-tts-frontend
-  #   ports:
-  #     - "${FRONTEND_PORT:-4321}:80"
-  #   depends_on:
-  #     - chatterbox-tts
-  #   restart: unless-stopped
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+    container_name: text-to-video-frontend
+    ports:
+      - "${FRONTEND_PORT:-3000}:3000"
+    environment:
+      - NEXT_PUBLIC_API_URL=http://localhost:8000
+    depends_on:
+      - server
+    restart: unless-stopped
 
   presenton:
     image: ghcr.io/presenton/presenton:latest

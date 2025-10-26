@@ -378,6 +378,7 @@ async def generate_video(
         )
 
 
+
 @app.get(
     "/api/v1/video/status/{job_id}",
     response_model=JobStatusResponse,

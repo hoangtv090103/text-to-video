@@ -69,7 +69,13 @@ Key principles:
 - Each scene should cover a logical unit of information
 - Visual prompts must be extremely detailed and specific
 - Narration should be engaging and educational
-- Maintain content accuracy and completeness"""
+- Maintain content accuracy and completeness
+
+⚠️ CRITICAL: Each scene MUST have UNIQUE and DISTINCT narration text!
+- DO NOT repeat the same narration across multiple scenes
+- Each scene should introduce NEW information or perspectives
+- Vary the narrative style, phrasing, and examples between scenes
+- Ensure logical progression without repetitive content"""
                 ),
                 HumanMessage(
                     content=f"Content from file '{file.filename}':\n\n{text_content[:8000]}\n\n{prompt}"
@@ -154,10 +160,32 @@ Key principles:
 
             script_scenes = self._parse_script_response(script_content)
 
+            # Validate for duplicate narrations
+            narration_texts = [scene["narration_text"] for scene in script_scenes]
+            unique_narrations = set(narration_texts)
+            if len(unique_narrations) < len(narration_texts):
+                duplicates = {}
+                for i, text in enumerate(narration_texts):
+                    if narration_texts.count(text) > 1:
+                        if text not in duplicates:
+                            duplicates[text] = []
+                        duplicates[text].append(i + 1)
+
+                logger.warning(
+                    "⚠️ DUPLICATE NARRATION DETECTED! This will cause identical audio in video.",
+                    extra={
+                        "duplicate_count": len(duplicates),
+                        "affected_scenes": duplicates,
+                        "provider": self.provider
+                    }
+                )
+
             logger.info(
                 "Asynchronous LLM script generation completed",
                 extra={
                     "scenes_generated": len(script_scenes),
+                    "unique_narrations": len(unique_narrations),
+                    "has_duplicates": len(unique_narrations) < len(narration_texts),
                     "visual_types": [scene["visual_type"] for scene in script_scenes],
                     "provider": self.provider,
                 },

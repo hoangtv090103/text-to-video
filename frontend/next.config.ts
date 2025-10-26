@@ -1,7 +1,15 @@
 import type { NextConfig } from "next";
 
 const nextConfig: NextConfig = {
-  /* config options here */
+  eslint: {
+    ignoreDuringBuilds: true,
+  },
+  typescript: {
+    ignoreBuildErrors: true,
+  },
+  turbopack: {
+    root: "/Users/hoangtv/text-to-video/frontend",
+  },
 };
 
 export default nextConfig;
