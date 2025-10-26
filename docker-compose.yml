@@ -13,6 +13,8 @@ services:
       timeout: 3s
       retries: 3
     restart: unless-stopped
+    networks:
+      - text-to-video-network
 
   frontend:
     build:
@@ -26,6 +28,8 @@ services:
     depends_on:
       - server
     restart: unless-stopped
+    networks:
+      - text-to-video-network
 
   server:
     build:
@@ -50,9 +54,30 @@ services:
       - LOCAL_MODEL_PATH=${LOCAL_MODEL_PATH:-llama2}
       - LOCAL_MODEL_TYPE=${LOCAL_MODEL_TYPE:-llama}
       - LOG_LEVEL=info
+      - TTS_SERVICE_URL=http://chatterbox-tts:4123/v1/audio/speech
+      - REDIS_HOST=redis
+      - REDIS_PORT=6379
+      - REDIS_DB=0
+      - ASSET_STORAGE_PATH=/app/data/assets
+      - VIDEO_OUTPUT_PATH=/app/data/videos
+      - VISUAL_STORAGE_PATH=/app/data/visuals
+      - MAX_CONCURRENT_JOBS=5
+      - MAX_CONCURRENT_SCENES=10
+    volumes:
+      - ./server/data:/app/data
+      - ./server/voice-sample.mp3:/app/voice-sample.mp3:ro
     depends_on:
+      - redis
       - chatterbox-tts
     restart: unless-stopped
+    networks:
+      - text-to-video-network
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 30s
 
   chatterbox-tts:
     build:
@@ -97,6 +122,8 @@ services:
       timeout: 15s
       retries: 5
       start_period: 10m
+    networks:
+      - text-to-video-network
 
 volumes:
   redis_data:
@@ -104,4 +131,5 @@ volumes:
   chatterbox-voices:
 
 networks:
-  default:
+  text-to-video-network:
+    driver: bridge
