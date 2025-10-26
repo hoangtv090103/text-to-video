@@ -22,19 +22,19 @@ export const ConnectionTest = () => {
   }
 
   return (
-    <div className="p-4 border rounded-lg bg-white">
-      <h3 className="text-lg font-semibold mb-4">Connection Test</h3>
+    <div className="p-6 border border-gray-200 rounded-lg bg-white shadow-sm">
+      <h3 className="text-lg font-semibold mb-4 admin-text">Connection Test</h3>
       <button
         onClick={testConnection}
         disabled={isLoading}
-        className="px-4 py-2 bg-blue-600 text-white rounded hover:bg-blue-700 disabled:opacity-50"
+        className="px-4 py-2 bg-blue-600 text-white rounded hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
       >
         {isLoading ? 'Testing...' : 'Test Backend Connection'}
       </button>
       
       {testResult && (
-        <div className="mt-4 p-3 bg-gray-100 rounded">
-          <pre className="text-sm whitespace-pre-wrap">{testResult}</pre>
+        <div className="mt-4 p-4 bg-gray-50 rounded-lg border border-gray-200">
+          <pre className="text-sm whitespace-pre-wrap admin-text font-mono leading-relaxed">{testResult}</pre>
         </div>
       )}
     </div>
